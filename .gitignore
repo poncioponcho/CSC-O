@@ -1,0 +1,36 @@
+# 排除包含"前100条"的文件
+*前100条*
+
+# 排除大文件（ESM-2嵌入等）
+*.npy
+*.npz
+*.pkl
+*.h5
+*.parquet
+*.pth
+*.pt
+
+# 排除临时文件和缓存
+*.tmp
+*.temp
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+*.swp
+*.bak
+
+# 排除输出目录中的大文件（保留JSON/TXT报告）
+output/*.png
+output/*.csv
+work/
+
+# 排除IDE配置
+.vscode/
+.idea/
+
+# 排除环境配置
+.env
+venv/
+.env.local
+.env.*.local
