@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CSC-O 远程运行操作指南 — 4090 GPU + VPN</title>
+<style>
+:root {
+    --bg: #0f172a; --card: #1e293b; --border: #334155;
+    --text: #e2e8f0; --text-dim: #94a3b8; --accent: #3b82f6;
+    --green: #22c55e; --red: #ef4444; --orange: #f59e0b;
+    --yellow: #eab308; --purple: #a855f7;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, 'SF Pro', 'PingFang SC', 'Microsoft YaHei', sans-serif; background: var(--bg); color: var(--text); line-height: 1.7; padding: 2rem; max-width: 1100px; margin: 0 auto; }
+
+h1 { font-size: 1.8rem; text-align: center; margin-bottom: 0.5rem; color: var(--accent); }
+.subtitle { text-align: center; color: var(--text-dim); margin-bottom: 2.5rem; font-size: 0.95rem; }
+
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem 2rem; margin-bottom: 1.5rem; }
+.card h2 { color: var(--accent); font-size: 1.25rem; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; }
+.card h2 .num { background: var(--accent); color: white; width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 0.85rem; flex-shrink: 0; }
+.card h3 { color: var(--yellow); font-size: 1.05rem; margin: 1.3rem 0 0.6rem; }
+
+pre { background: #0d1117; border: 1px solid var(--border); border-radius: 8px; padding: 1rem; overflow-x: auto; font-size: 0.88rem; line-height: 1.6; position: relative; margin: 0.8rem 0; }
+pre .prompt { color: var(--green); user-select: none; }
+pre .comment { color: var(--text-dim); font-style: italic; }
+pre .cmd { color: #fbbf24; }
+pre .path { color: #60a5fa; }
+pre .flag { color: #f472b6; }
+pre .val { color: #34d399; }
+
+table { width: 100%; border-collapse: collapse; margin: 0.8rem 0; font-size: 0.9rem; }
+th, td { border: 1px solid var(--border); padding: 0.6rem 0.8rem; text-align: left; }
+th { background: rgba(59,130,246,0.15); color: var(--accent); font-weight: 600; }
+tr:hover td { background: rgba(255,255,255,0.03); }
+
+.tag { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 0.78rem; font-weight: 500; }
+.tag-req { background: rgba(239,68,68,0.15); color: var(--red); }
+.tag-opt { background: rgba(245,158,11,0.15); color: var(--orange); }
+.tag-info { background: rgba(59,130,246,0.15); color: var(--accent); }
+.tag-ok { background: rgba(34,197,94,0.15); color: var(--green); }
+
+.warn-box { background: rgba(234,179,8,0.08); border-left: 4px solid var(--yellow); padding: 1rem 1.5rem; border-radius: 0 8px 8px 0; margin: 1rem 0; font-size: 0.92rem; }
+.error-box { background: rgba(239,68,68,0.08); border-left: 4px solid var(--red); padding: 1rem 1.5rem; border-radius: 0 8px 8px 0; margin: 1rem 0; font-size: 0.92rem; }
+.ok-box { background: rgba(34,197,94,0.08); border-left: 4px solid var(--green); padding: 1rem 1.5rem; border-radius: 0 8px 8px 0; margin: 1rem 0; font-size: 0.92rem; }
+
+.step-list { list-style: none; counter-reset: step; }
+.step-list li { counter-increment: step; margin-bottom: 0.8rem; padding-left: 2.2rem; position: relative; }
+.step-list li::before { content: counter(step); position: absolute; left: 0; top: 0; background: var(--accent); color: white; width: 20px; height: 20px; border-radius: 50%; font-size: 0.75rem; display: flex; align-items: center; justify-content: center; font-weight: bold; }
+
+.flow-diagram { display: flex; gap: 0.5rem; overflow-x: auto; padding: 1rem 0; }
+.flow-step { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 0.8rem 1.2rem; min-width: 140px; text-align: center; font-size: 0.85rem; flex-shrink: 0; }
+.flow-step .icon { font-size: 1.5rem; margin-bottom: 0.3rem; }
+.flow-arrow { color: var(--accent); font-size: 1.3rem; display: flex; align-items: center; flex-shrink: 0; }
+
+.toc { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem 2rem; margin-bottom: 2rem; }
+.toc h2 { color: var(--purple); margin-bottom: 0.8rem; }
+.toc a { color: var(--accent); text-decoration: none; display: block; padding: 0.25rem 0; font-size: 0.93rem; }
+.toc a:hover { text-decoration: underline; }
+
+code { background: rgba(59,130,246,0.12); padding: 2px 6px; border-radius: 4px; font-size: 0.87em; color: #93c5fd; }
+
+.footer { text-align: center; color: var(--text-dim); font-size: 0.85rem; margin-top: 2.5rem; padding-top: 1.5rem; border-top: 1px solid var(--border); }
+</style>
+</head>
+<body>
+
+<h1>🧬 CSC-O 远程运行操作指南</h1>
+<p class="subtitle">Causal-Stratified Counterfactual Optimization — 4090 GPU · VPN连接 · 后台托管运行</p>
+
+<div class="toc">
+<h2>📑 目录导航</h2>
+<a href="#sec0">§0 快速流程总览</a>
+<a href="#sec1">§1 数据准备：10000条CSV输入</a>
+<a href="#sec2">§2 VPN连接：OpenConnect配置</a>
+<a href="#sec3">§3 SSH登录与文件传输</a>
+<a href="#sec4">§4 环境部署：依赖安装</a>
+<a href="#sec5">§5 运行管线：后台托管执行</a>
+<a href="#sec6">§6 实时监控：日志+进度查看</a>
+<a href="#sec7">§7 结果下载与验证</a>
+<a href="#sec8">§8 常见问题排查</a>
+</div>
+
+<!-- ═══════════════════════════════════════ -->
+<!-- §0 流程总览 -->
+<!-- ═══════════════════════════════════════ -->
+<div class="card" id="sec0">
+<h2><span class="num">0</span> 快速流程总览</h2>
+
+<div class="flow-diagram">
+<div class="flow-step"><div class="icon">📊</div>准备CSV<br><small>10000条数据</small></div>
+<div class="flow-arrow">→</div>
+<div class="flow-step"><div class="icon">🔒</div>VPN连接<br><small>OpenConnect</small></div>
+<div class="flow-arrow">→</div>
+<div class="flow-step"><div class="icon">📤</div>上传文件<br><small>SCP/SFTP</small></div>
+<div class="flow-arrow">→</div>
+<div class="flow-step"><div class="icon">⚙️</div>环境部署<br><small>Pip install</small></div>
+<div class="flow-arrow">→</div>
+<div class="flow-step"><div class="icon">▶️</div>后台运行<br><small>nohup/screen</small></div>
+<div class="flow-arrow">→</div>
+<div class="flow-step"><div class="icon">📈</div>监控输出<br><small>SSH/tail</small></div>
+<div class="flow-arrow">→</div>
+<div class="flow-step"><div class="icon">✅</div>下载结果<br><small>SCP回传</small></div>
+</div>
+
+<div class="ok-box">
+<strong>预计耗时：</strong>ESM-2编码 ~4-6小时（10572条，batch_size=4）<br>
+<strong>GPU显存：</strong>~6GB（esm2_t12_35M_UR50D）<br>
+<strong>CPU阶段：</strong>~3小时（Cox模型、因果图、Double ML）<br>
+<strong>总计：</strong>约 <strong>1个工作日</strong>
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════ -->
+<!-- §1 数据准备 -->
+<!-- ═══════════════════════════════════════ -->
+<div class="card" id="sec1">
+<h2><span class="num">1</span> 数据准备：10000条CSV输入</h2>
+
+<h3>1.1 输入文件要求</h3>
+
+<table>
+<tr><th>参数</th><th>说明</th><th>示例</th></tr>
+<tr><td>格式</td><td>CSV (逗号分隔) 或 XLSX</td><td><code>.csv</code> / <code>.xlsx</code></td></tr>
+<tr><td>行数</td><td>建议 10000 条以上</td><td>10572 条已测试通过</td></tr>
+<tr><td>编码</td><td>UTF-8</td><td>避免中文列名或特殊字符</td></tr>
+<tr><td>大小</td><td>通常 &lt; 200MB</td><td>含完整序列文本</td></tr>
+</table>
+
+<h3>1.2 必需列清单</h3>
+<table>
+<tr><th>列名</th><th>类型</th><th>必需性</th><th>别名支持</th><th>默认值(缺失时)</th></tr>
+<tr><td><code>vh_sequence</code></td><td>string</td><td><span class="tag tag-req">必需</span></td><td><code>vh_seq</code>, <code>heavy_chain</code>, <code>vh</code>, <code>full_sequence</code></td><td><code>''</code>(空)</td></tr>
+<tr><td><code>rf2_pred_lddt</code></td><td>float</td><td><span class="tag tag-req">必需</span></td><td><code>pred_lddt</code>, <code>plddt</code></td><td><code>NaN</code></td></tr>
+<tr><td><code>rf2_interaction_pae</code></td><td>float</td><td><span class="tag tag-req">必需</span></td><td><code>interaction_pae</code>, <code>pae</code></td><td><code>NaN</code></td></tr>
+<tr><td><code>rf2_passed_filter</code></td><td>bool/int</td><td><span class="tag tag-opt">推荐</span></td><td><code>passed_filter</code>, <code>rf2_pass</code></td><td><code>False</code></td></tr>
+<tr><td><code>final_candidate</code></td><td>bool/int</td><td><span class="tag tag-opt">推荐</span></td><td><code>is_candidate</code>, <code>selected</code></td><td><code>False</code></td></tr>
+<tr><td><code>cdr3_sequence</code></td><td>string</td><td><span class="tag tag-opt">推荐</span></td><td><code>cdr3</code>, <code>h3_sequence</code></td><td>从VH序列自动提取</td></tr>
+<tr><td><code>funnel_stage</code></td><td>string</td><td><span class="tag tag-opt">推荐</span></td><td><code>stage</code></td><td>自动推断</td></tr>
+<tr><td><code>af3_analyzed</code></td><td>bool</td><td><span class="tag tag-info">可选</span></td><td>-</td><td><code>False</code></td></tr>
+<tr><td><code>schrodinger_analyzed</code></td><td>bool</td><td><span class="tag tag-info">可选</span></td><td>-</td><td><code>False</code></td></tr>
+<tr><td><code>backbone_id</code></td><td>int</td><td><span class="tag tag-info">可选</span></td><td><code>backbone</code></td><td><code>0</code></td></tr>
+</table>
+
+<h3>1.3 数据校验命令（本地先跑）</h3>
+<pre><span class="prompt">$ </span><span class="cmd">python3 -c "
+import pandas as pd
+df = pd.read_csv('你的数据.csv')
+print(f'行数: {len(df)}')
+print(f'vh_sequence 非空: {df[\"vh_sequence\"].notna().sum()}')
+print(f'rf2_pred_lddt 有效: {df[\"rf2_pred_lddt\"].notna().sum()}')
+print(f'rf2_interaction_pae 有效: {df[\"rf2_interaction_pae\"].notna().sum()}')
+"</span></pre>
+
+<div class="warn-box">
+⚠️ 如果 <code>rf2_pred_lddt</code> 或 <code>rf2_interaction_pae</code> 全为空，管线会在 DataAdapter.validate() 阶段报错：<br>
+<code>ValueError: 有效数据不足 (n 行), 需要至少50条有RF2指标的记录</code><br>
+请确保这两列有实际数值。
+</div>
+
+<h3>1.4 管线自动补全能力</h3>
+<p>代码中的 <code>DataAdapter</code> 模块会自动处理以下情况：</p>
+<ul class="step-list">
+<li>缺失列 → 按81列完整模式自动填充默认值（NaN/False/''）</li>
+<li>列名别名 → 自动映射到标准名称（如 <code>plddt</code> → <code>rf2_pred_lddt</code>）</li>
+<li>布尔值格式 → 支持 True/False/1/0/yes/no/1.0/0.0 多种变体</li>
+<li>VH序列缺失 → 从 <code>full_sequence</code> 回退</li>
+<li>CDR3缺失 → 从VH序列启发式提取（WGQGTLVTVS motif）</li>
+<li>funnel_stage缺失 → 从各阶段标志自动推断</li>
+</ul>
+</div>
+
+<!-- ═══════════════════════════════════════ -->
+<!-- §2 VPN连接 -->
+<!-- ═══════════════════════════════════════ -->
+<div class="card" id="sec2">
+<h2><span class="num">2</span> VPN连接：OpenConnect 配置</h2>
+
+<h3>2.1 前置条件确认</h3>
+<table>
+<tr><th>检查项</th><th>状态</th><th>操作</th></tr>
+<tr><td>OpenConnect 已安装</td><td><span class="tag tag-ok">需确认</span></td><td><code>which openconnect</code></td></tr>
+<tr><td>VPN配置文件 (.ovpn/.conf)</td><td><span class="tag tag-ok">需确认</span></td><td>通常在 <code>/etc/openconnect/</code> 或导师提供</td></tr>
+<tr><td>服务器IP地址</td><td><span class="tag tag-req">待填写</span></td><td>见下方配置区</td></tr>
+<tr><td>账号密码</td><td><span class="tag tag-req">待填写</span></td><td>见下方配置区</td></tr>
+</table>
+
+<h3>2.2 连接命令（本地终端）</h3>
+
+<pre><span class="comment"># 方式A：前台运行（调试用）</span>
+<span class="prompt">$ </span><span class="cmd">sudo openconnect</span> <span class="val">&lt;VPN_SERVER_IP&gt;</span> \
+  <span class="flag">--user</span>=<span class="val">&lt;USERNAME&gt;</span> \
+  <span class="flag">--authgroup</span>=<span class="val">&lt;GROUP_NAME&gt;</span> \
+  <span class="flag">--protocol=anyconnect</span>
+
+<span class="comment"># 方式B：后台运行（推荐生产使用）</span>
+<span class="prompt">$ </span><span class="cmd">sudo openconnect</span> <span class="val">&lt;VPN_SERVER_IP&gt;</span> \
+  <span class="flag">--user</span>=<span class="val">&lt;USERNAME&gt;</span> \
+  <span class="flag">--background</span> \
+  <span class="flag">--pid-file=/tmp/vpn.pid</span> \
+  <span class="flag">--script=/etc/vpnc-script-default</span> \
+  <span class="flag">--passwd-on-stdin</span> <<< <span class="val">&lt;PASSWORD&gt;</span>
+
+<span class="comment"># 方式C：使用配置文件（如果导师提供了.ovpn）</span>
+<span class="prompt">$ </span><span class="cmd">sudo openconnect</span> <span class="flag">--config</span>=<span class="path">/path/to/school.vpn.conf</span> \
+  <span class="flag">--background</span> <span class="flag">--pid-file=/tmp/vpn.pid</span>
+</pre>
+
+<h3>2.3 验证VPN连通性</h3>
+<pre><span class="prompt">$ </span><span class="cmd">ping</span> <span class="val">&lt;GPU_SERVER_INTERNAL_IP&gt;</span>
+<span class="comment"># 应该能ping通内网服务器</span>
+
+<span class="prompt">$ </span><span class="cmd">ssh</span> <span class="val">&lt;USERNAME&gt;</span>@<span class="val">&lt;GPU_SERVER_INTERNAL_IP&gt;</span>
+<span class="comment"># 应该能成功SSH登录</span>
+</pre>
+
+<div class="error-box">
+❌ <strong>常见问题：</strong><br>
+• <code>openconnect: command not found</code> → 安装：<code>brew install openconnect</code> (macOS) 或 <code>sudo apt install openconnect</code> (Linux)<br>
+• <code>SSL connect error</code> → 检查VPN证书是否过期，或加 <code>--no-cert-check</code>（不安全但可用）<br>
+• <code>Authentication failed</code> → 确认用户名/密码/认证组正确
+</div>
+
+<h3>2.4 ⚙️ 你的VPN配置（请填入以下信息）</h3>
+<div style="background:#0d1117;border:1px dashed var(--border);border-radius:8px;padding:1.2rem;margin:1rem 0;">
+<table>
+<tr><th>字段</th><th>你的值</th><th>占位符</th></tr>
+<tr><td>VPN服务器IP</td><td><input type="text" placeholder="例如: vpn.school.edu.cn" style="width:100%;padding:6px;background:#1e293b;border:1px solid #475569;color:#e2e8f0;border-radius:4px;"></td><td><code>&lt;VPN_SERVER_IP&gt;</code></td></tr>
+<tr><td>用户名</td><td><input type="text" placeholder="例如: zhangsan" style="width:100%;padding:6px;background:#1e293b;border:1px solid #475569;color:#e2e8f0;border-radius:4px;"></td><td><code>&lt;USERNAME&gt;</code></td></tr>
+<tr><td>密码</td><td><input type="password" placeholder="输入密码" style="width:100%;padding:6px;background:#1e293b;border:1px solid #475569;color:#e2e8f0;border-radius:4px;"></td><td><code>&lt;PASSWORD&gt;</code></td></tr>
+<tr><td>认证组</td><td><input type="text" placeholder="例如: staff 或 student" style="width:100%;padding:6px;background:#1e293b;border:1px solid #475569;color:#e2e8f0;border-radius:4px;"></td><td><code>&lt;GROUP_NAME&gt;</code></td></tr>
+<tr><td>GPU服务器内网IP</td><td><input type="text" placeholder="例如: 192.168.1.100" style="width:100%;padding:6px;background:#1e293b;border:1px solid #475569;color:#e2e8f0;border-radius:4px;"></td><td><code>&lt;GPU_SERVER_INTERNAL_IP&gt;</code></td></tr>
+<tr><td>SSH端口</td><td><input type="text" value="22" style="width:100%;padding:6px;background:#1e293b;border:1px solid #475569;color:#e2e8f0;border-radius:4px;"></td><td><code>&lt;SSH_PORT&gt;</code></td></tr>
+</table>
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════ -->
+<!-- §3 SSH登录与文件传输 -->
+<!-- ═══════════════════════════════════════ -->
+<div class="card" id="sec3">
+<h2><span class="num">3</span> SSH 登录与文件传输</h2>
+
+<h3>3.1 SSH 登录 GPU 服务器</h3>
+<pre><span class="prompt">$ </span><span class="cmd">ssh</span> <span class="val">&lt;USERNAME&gt;</span>@<span class="val">&lt;GPU_SERVER_INTERNAL_IP&gt;</span> <span class="flag">-p</span> <span class="val">&lt;SSH_PORT&gt;</span>
+
+<span class="comment"># 首次登录会提示保存指纹，输入 yes 即可</span>
+<span class="comment"># The authenticity of host 'xxx' can't be established.</span>
+<span class="comment"># ECDSA key fingerprint is SHA256:xxxxxx.</span>
+<span class="comment"># Are you sure you want to continue connecting (yes/no/[fingerprint])? yes</span>
+</pre>
+
+<h3>3.2 上传数据文件（本地→服务器）</h3>
+<pre><span class="comment"># 上传CSV数据文件到服务器</span>
+<span class="prompt>$ </span><span class="cmd">scp</span> <span class="flag">-P</span> <span class="val">&lt;SSH_PORT&gt;</span> \
+  <span class="path">~/Desktop/你的数据.csv</span> \
+  <span class="val">&lt;USERNAME&gt;</span>@<span class="val">&lt;GPU_SERVER_INTERNAL_IP&gt;</span>:<span class="path">~/csco_runs/data/input.csv</span>
+
+<span class="comment"># 上传整个CSC-O代码目录</span>
+<span class="prompt">$ </span><span class="cmd">scp</span> <span class="flag">-rP</span> <span class="flag">-P</span> <span class="val">&lt;SSH_PORT&gt;</span> \
+  <span class="path">~/Desktop/课题组/蛋白质结构序列实验_结构方向优化/analyze1/</span> \
+  <span class="val">&lt;USERNAME&gt;</span>@<span class="val">&lt;GPU_SERVER_INTERNAL_IP&gt;</span>:<span class="path">~/csco_runs/code/</span>
+</pre>
+
+<h3>3.3 在服务器上创建工作目录</h3>
+<pre><span class="comment"># 登录后执行</span>
+<span class="prompt">server$ </span><span class="cmd">mkdir -p ~/csco_runs/{data,code,out,work}</span>
+<span class="prompt">server$ </span><span class="cmd">ls -la ~/csco_runs/</span>
+<span class="comment"># drwxr-xr-x  data/ code/ out/ work/</span>
+</pre>
+
+<div class="ok-box">
+✅ 目录结构说明：<br>
+• <code>data/</code> — 放置输入CSV文件<br>
+• <code>code/</code> — 放置CSC-O源码（所有.py文件）<br>
+• <code>out/</code> — 输出结果（分析报告、可视化图、策略JSON等）<br>
+• <code>work/</code> — 工作缓存（pipeline_state.json断点续跑）
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════ -->
+<!-- §4 环境部署 -->
+<!-- ═══════════════════════════════════════ -->
+<div class="card" id="sec4">
+<h2><span class="num">4</span> 环境部署：依赖安装</h2>
+
+<h3>4.1 检查系统环境</h3>
+<pre><span class="prompt">server$ </span><span class="cmd">python3 --version</span>          <span class="comment"># 需要 >= 3.10</span>
+<span class="prompt">server$ </span><span class="cmd">nvidia-smi</span>                  <span class="comment"># 确认4090可见</span>
+<span class="prompt">server$ </span><span class="cmd">nvcc --version</span>             <span class="comment"># CUDA版本</span>
+<span class="prompt">server$ </span><span class="cmd">free -h</span>                     <span class="comment"># 内存 >= 16GB</span>
+<span class="prompt">server$ </span><span class="cmd">df -h | head -5</span>           <span class="comment">// 磁盘空间 >= 10GB</span>
+</pre>
+
+<h3>4.2 创建虚拟环境并安装依赖</h3>
+<pre><span class="prompt">server$ </span><span class="cmd">cd ~/csco_runs</span>
+<span class="prompt">server$ </span><span class="cmd">python3 -m venv venv</span>
+<span class="prompt">server$ </span><span class="cmd">source venv/bin/activate</span>
+
+<span class="comment"># 核心依赖（一次性安装全部）</span>
+<span class="prompt">(venv)$ </span><span class="cmd">pip install --upgrade pip</span>
+<span class="prompt">(venv)$ </span><span class="cmd">pip install pandas numpy scipy scikit-learn matplotlib seaborn openpyxl statsmodels fairlearn</span>
+<span class="prompt">(venv)$ </span><span class="cmd">pip install lightgbm torch torchvision</span>
+<span class="prompt">(venv)$ </span><span class="cmd">pip install fair-esm</span>          <span class="comment"># ESM-2蛋白质语言模型</span>
+
+<span class="comment"># 验证关键包</span>
+<span class="prompt">(venv)$ </span><span class="cmd">python3 -c "import esm; print('ESM OK:', esm.__version__)"</span>
+<span class="prompt">(venv)$ </span><span class="cmd">python3 -c "import torch; print('CUDA:', torch.cuda.is_available(), torch.cuda.get_device_name(0))"</span>
+<span class="prompt">(venv)$ </span><span class="cmd">python3 -c "import lifelines; import lightgbm; print('All deps OK')"</span>
+</pre>
+
+<div class="warn-box">
+⚠️ <strong>关于 PyTorch 版本：</strong>如果服务器CUDA版本较旧（如11.x），可能需要指定PyTorch版本：<br>
+<code>pip install torch==2.0.1+cu118 torchvision==0.15.2+cu118 -f https://download.pytorch.org/whl/cu118/torch_stable.html</code><br>
+先用 <code>nvidia-smi</code> 查看CUDA版本，再选择对应PyTorch。
+</div>
+
+<h3>4.3 一键安装脚本（可复制到服务器直接运行）</h3>
+<pre><span class="prompt">server$ </span><span class="cmd">cat > ~/csco_runs/setup_env.sh << 'EOF'
+#!/bin/bash
+set -e
+cd ~/csco_runs
+python3 -m venv venv
+source venv/bin/activate
+pip install --upgrade pip
+pip install pandas numpy scipy scikit-learn matplotlib seaborn openpyxl statsmodels fairlearn
+pip install lightgbm torch torchvision
+pip install fair-esm
+echo "=== Environment ready ==="
+python3 -c "import esm,torch,lifelines,lightgbm; print('All OK')"
+EOF
+chmod +x ~/csco_runs/setup_env.sh
+bash ~/csco_runs/setup_env.sh</span></pre>
+</div>
+
+<!-- ═══════════════════════════════════════ -->
+<!-- §5 运行管线 -->
+<!-- ═══════════════════════════════════════ -->
+<div class="card" id="sec5">
+<h2><span class="num">5</span> 运行管线：后台托管执行</h2>
+
+<h3>5.1 完整运行命令</h3>
+<pre><span class="comment"># 激活环境</span>
+<span class="prompt">server$ </span><span class="cmd">source ~/csco_runs/venv/bin/activate</span>
+<span class="prompt">server$ </span><span class="cmd">cd ~/csco_runs/code</span>
+
+<span class="comment"># ★★★ 主运行命令 ★★★</span>
+<span class="prompt">(venv)$ </span><span class="cmd">KMP_DUPLICATE_LIB_OK=TRUE python3 csco_pipeline.py \</span>
+  <span class="flag">--input</span> <span class="path">~/csco_runs/data/input.csv</span> \
+  <span class="flag">--output</span> <span class="path">~/csco_runs/out</span> \
+  <span class="flag">--work</span> <span class="path">~/csco_runs/work</span> \
+  <span class="flag">--device</span> cuda \
+  <span class="flag">--batch-size</span> 4 \
+  <span class="flag">--top-n</span> 8000 \
+  <span class="flag">--resume</span> \
+  <span class="flag">&gt;</span> <span class="path">~/csco_runs/out/run.log</span> 2&gt;&amp;1 &amp;
+
+<span class="comment"># 记录进程PID</span>
+<span class="prompt">server$ </span><span class="cmd">echo $! &gt; ~/csco_runs/out/pid.txt</span>
+<span class="prompt">server$ </span><span class="cmd">cat ~/csco_runs/out/pid.txt</span>   <span class="comment"># 显示PID号</span>
+</pre>
+
+<h3>5.2 使用 screen/tmux 保持会话（强烈推荐）</h3>
+<pre><span class="comment"># 创建一个持久化终端会话</span>
+<span class="prompt">server$ </span><span class="cmd">screen -S csco</span>
+
+<span class="comment"># 在screen内部激活环境并运行</span>
+<span class="prompt">server# </span><span class="cmd">source ~/csco_runs/venv/bin/activate</span>
+<span class="prompt">server# </span><span class="cmd">cd ~/csco_runs/code</span>
+<span class="prompt">server# </span><span class="cmd">KMP_DUPLICATE_LIB_OK=TRUE python3 csco_pipeline.py \</span>
+  <span class="flag">--input</span> <span class="path">~/csco_runs/data/input.csv</span> \
+  <span class="flag">--output</span> <span class="path">~/csco_runs/out</span> \
+  <span class="flag">--work</span> <span class="path">~/csco_runs/work</span> \
+  <span class="flag">--device</span> cuda <span class="flag">--batch-size</span> 4 <span class="flag">--top-n</span> 8000 <span class="flag">--resume</span>
+
+<span class="comment"># 按 Ctrl+A 再按 D 脱离会话（程序继续运行）</span>
+<span class="comment"># 重新连接: screen -r csco</span>
+</pre>
+
+<h3>5.3 参数详解</h3>
+<table>
+<tr><th>参数</th><th>缩写</th><th>默认值</th><th>说明</th></tr>
+<tr><td><code>--input</code></td><td><code>-i</code></td><td>必填</td><td>输入CSV/XLSX路径</td></tr>
+<tr><td><code>--output</code></td><td><code>-o</code></td><td><code>./output</code></td><td>输出目录</td></tr>
+<tr><td><code>--work</code></td><td><code>-w</code></td><td><code>./work</code></td><td>工作/缓存目录</td></tr>
+<tr><td><code>--device</code></td><td><code>-d</code></td><td><code>auto</code></td><td>计算设备: <code>cuda</code>/<code>mps</code>/<code>cpu</code></td></tr>
+<tr><td><code>--batch-size</code></td><td><code>-b</code></td><td><code>4</code></td><td>ESM-2批大小（4090可用8-16）</td></tr>
+<tr><td><code>--top-n</code></td><td><code>-n</code></td><td><code>2000</code></td><td>反事实编辑处理的失败序列数</td></tr>
+<tr><td><code>--resume</code></td><td><code>-r</code></td><td>关闭</td><td>断点续跑（跳过已完成阶段）</td></tr>
+</table>
+
+<h3>5.4 6个阶段的预期输出</h3>
+<table>
+<tr><th>阶段</th><th>名称</th><th>耗时估计</th><th>关键输出文件</th></tr>
+<tr><td>1</td><td>data_engineering</td><td>~30秒</td><td><code>feature_matrix.csv</code>, <code>survival_data.csv</code></td></tr>
+<tr><td>2</td><td>layer1_stratified</td><td>~2分钟</td><td><code>cox_hazard_ratios.csv</code>, <code>*.png</code> ×5</td></tr>
+<tr><td>3</td><td>layer2_causal</td><td>~3分钟</td><td><code>ate_estimates.csv</code>, <code>*.png</code> ×3</td></tr>
+<tr><td>4</td><td>layer3_esm2_encode</td><td><strong>~4-6小时</strong></td><td><code>esm2_embeddings.npy</code> (20MB)</td></tr>
+<tr><td>5</td><td>layer3_counterfactual</td><td>~30分钟</td><td><code>counterfactual_suggestions.csv</code>, <code>*.png</code> ×3</td></tr>
+<tr><td>6</td><td>layer5_synthesis</td><td>~1分钟</td><td><code>design_strategy.json</code>, <code>design_strategy.txt</code>, <code>csco_analysis_report.txt</code></td></tr>
+</table>
+
+<div class="ok-box">
+✅ <strong>断点续跑机制：</strong>每个阶段完成后状态写入 <code>work/pipeline_state.json</code>。<br>
+如果中途中断（如网络断开），重新执行相同命令加 <code>--resume</code> 即可跳过已完成阶段继续。<br>
+ESM-2编码完成后生成的 <code>esm2_embeddings.npy</code> 会被缓存，不会重新编码。
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════ -->
+<!-- §6 监控 -->
+<!-- ═══════════════════════════════════════ -->
+<div class="card" id="sec6">
+<h2><span class="num">6</span> 实时监控：日志 + 进度查看</h2>
+
+<h3>6.1 查看实时日志</h3>
+<pre><span class="comment"># 方式A: tail 实时跟踪日志（最常用）</span>
+<span class="prompt">server$ </span><span class="cmd">tail -f ~/csco_runs/out/run.log</span>
+<span class="comment"># Ctrl+C 退出跟踪（不影响运行中的程序）</span>
+
+<span class="comment"># 方式B: 查看最近N行</span>
+<span class="prompt">server$ </span><span class="cmd">tail -100 ~/csco_runs/out/run.log</span>
+
+<span class="comment"># 方式C: 搜索关键字</span>
+<span class="prompt">server$ </span><span class="cmd">grep -E "(阶段|Stage|完成|Error|error)" ~/csco_runs/out/run.log | tail -30</span>
+</pre>
+
+<h3>6.2 检查进程状态</h3>
+<pre><span class="comment"># 进程是否还在运行</span>
+<span class="prompt">server$ </span><span class="cmd">ps aux | grep csco_pipeline</span>
+<span class="prompt">server$ </span><span class="cmd">cat ~/csco_runs/out/pid.txt | xargs ps -p</span>
+
+<span class="comment"># GPU使用情况</span>
+<span class="prompt">server$ </span><span class="cmd">watch -n 2 nvidia-smi</span>
+
+<span class="comment"># 已完成的阶段</span>
+<span class="prompt">server$ </span><span class="cmd">cat ~/csco_runs/work/pipeline_state.json | python3 -m json.tool</span>
+
+<span class="comment"># 输出文件列表（查看哪些已经生成）</span>
+<span class="prompt">server$ </span><span class="cmd">ls -lhS ~/csco_runs/out/</span>
+</pre>
+
+<h3>6.3 从本地远程监控（不保持SSH连接）</h3>
+<pre><span class="comment"># 方法1: SSH + tail 组合（新开一个终端窗口）</span>
+<span class="prompt">$ </span><span class="cmd">ssh</span> <span class="val">&lt;USER&gt;</span>@<span class="val">&lt;SERVER_IP&gt;</span> <span class="flag">-t</span> <span class="cmd">"tail -f ~/csco_runs/out/run.log"</span>
+
+<span class="comment"># 方法2: 使用 tmux/screen 在服务器端保持session</span>
+<span class="prompt">server$ </span><span class="cmd">tmux new -s monitor</span>
+<span class="prompt">server# </span><span class="cmd">htop</span>                    <span class="# 或 watch nvidia-smi</span>
+<span class="comment"># Ctrl+B 然后按 D 脱离</span>
+<span class="comment"># 重连: tmux attach -t monitor</span>
+</pre>
+
+<h3>6.4 各阶段的关键日志标记</h3>
+<table>
+<tr><th>阶段</th><th>开始标记</th><th>完成标记</th></tr>
+<tr><td>数据工程</td><td><code>=== 数据工程 ===</code></td><td><code>Feature matrix shape:</code></td></tr>
+<tr><td>分层归因</td><td><code>>> 启动阶段: layer1_stratified</code></td><td><code><<< 阶段完成: layer1_stratified</code></td></tr>
+<tr><td>因果引擎</td><td><code>>> 启动阶段: layer2_causal</code></td><td><code><<< 阶段完成: layer2_causal</code></td></tr>
+<tr><td>ESM-2编码</td><td><code>Loading ESM-2 model</code></td><td><code>ESM-2编码完成:</code></td></tr>
+<tr><td>反事实分析</td><td><code>>> 启动阶段: layer3_counterfactual</code></td><td><code>Generated N counterfactual suggestions</code></td></tr>
+<tr><td>规则合成</td><td><code>>> 启动阶段: layer5_synthesis</code></td><td><code>策略文件: design_strategy.json</code></td></tr>
+<tr><td>全部完成</td><td>-</td><td><code>管线完成！输出目录:</code></td></tr>
+</table>
+</div>
+
+<!-- ═══════════════════════════════════════ -->
+<!-- §7 结果下载 -->
+<!-- ═══════════════════════════════════════ -->
+<div class="card" id="sec7">
+<h2><span class="num">7</span> 结果下载与验证</h2>
+
+<h3>7.1 从服务器下载结果到本地</h3>
+<pre><span class="comment"># 下载核心结果文件</span>
+<span class="prompt">$ </span><span class="cmd">scp</span> <span class="flag">-rP</span> <span class="flag">-P</span> <span class="val">&lt;PORT&gt;</span> \
+  <span class="val">&lt;USER&gt;</span>@<span class="val">&lt;SERVER_IP&gt;</span>:<span class="path">~/csco_runs/out/design_strategy.*</span> \
+  <span class="path">~/Desktop/results/</span>
+
+<span class="comment"># 下载全部输出（包含图片和CSV）</span>
+<span class="prompt">$ </span><span class="cmd">scp</span> <span class="flag">-rP</span> <span class="flag">-P</span> <span class="val">&lt;PORT&gt;</span> \
+  <span class="val">&lt;USER&gt;</span>@<span class="val">&lt;SERVER_IP&gt;</span>:<span class="path">~/csco_runs/out/*.txt</span> \
+  <span class="path">~/Desktop/results/</span>
+
+<span class="comment"># 下载分析报告和策略文件</span>
+<span class="prompt>$ </span><span class="cmd">scp</span> <span class="flag">-P</span> <span class="val">&lt;PORT&gt;</span> \
+  <span class="val">&lt;USER&gt;</span>@<span class="val">&lt;SERVER_IP&gt;</span>:<span class="path">~/csco_runs/out/{csco_analysis_report.txt,design_strategy.json,design_strategy.txt,csco_dashboard.png}</span> \
+  <span class="path">~/Desktop/results/</span>
+</pre>
+
+<h3>7.2 关键产出物清单</h3>
+<table>
+<tr><th>文件</th><th>用途</th><th>优先级</th></tr>
+<tr><td><code>design_strategy.json</code></td><td>机器可读的完整设计策略（硬约束/软偏好/反模式/模板库）</td><td><span class="tag tag-req">最高</span></td></tr>
+<tr><td><code>design_strategy.txt</code></td><td>Proteo-R1/DLDesign可直接读取的策略文本</td><td><span class="tag tag-req">最高</span></td></tr>
+<tr><td><code>csco_analysis_report.txt</code></td><td>综合分析报告（HR/ATE/通过率/挽救编辑等）</td><td><span class="tag tag-req">高</span></td></tr>
+<tr><td><code>csco_dashboard.png</code></td><td>9面板综合仪表板可视化</td><td><span class="tag tag-opt">中</span></td></tr>
+<tr><td><code>counterfactual_suggestions.csv</code></td><td>每条失败序列的Top-3反事实编辑建议</td><td><span class="tag tag-opt">中</span></td></tr>
+<tr><td><code>position_specific_cate.csv</code></td><td>CDR3每个位置每种氨基酸的CATE效应</td><td><span class="tag tag-opt">中</span></td></tr>
+<tr><td><code>truncation_suggestions.csv</code></td><td>长CDR3截短至6/7的挽救建议</td><td><span class="tag tag-opt">中</span></td></tr>
+<tr><td><code>cox_hazard_ratios.csv</code></td><td>Cox比例风险模型的HR统计量</td><td><span class="tag tag-info">参考</span></td></tr>
+<tr><td><code>ate_estimates.csv</code></td><td>因果ATE估计表</td><td><span class="tag tag-info">参考</span></td></tr>
+</table>
+
+<h3>7.3 本地快速验证</h3>
+<pre><span class="prompt">$ </span><span class="cmd">python3 -c "import json; d=json.load(open('results/design_strategy.json')); print(d['hard_constraints']); print(d['soft_preferences'])"</span>
+</pre>
+</div>
+
+<!-- ═══════════════════════════════════════ -->
+<!-- §8 FAQ -->
+<!-- ═══════════════════════════════════════ -->
+<div class="card" id="sec8">
+<h2><span class="num">8</span> 常见问题排查</h2>
+
+<h3>Q1: VPN连接后无法SSH到GPU服务器</h3>
+<pre><span class="comment"># 检查路由</span>
+<span class="prompt">$ </span><span class="cmd">traceroute</span> <span class="val">&lt;INTERNAL_IP&gt;</span>
+<span class="comment"># 如果不通，尝试指定VPN子网的路由</span>
+<span class="prompt">$ </span><span class="cmd">ip route add</span> <span class="val">&lt;SUBNET&gt;</span> via <span class="val">&lt;VPN_GATEWAY&gt;</span>
+</pre>
+
+<h3>Q2: ESM-2模型下载很慢或超时</h3>
+<p>首次运行会从Facebook服务器下载模型权重（~300MB）。如果服务器在国内网络受限：</p>
+<pre><span class="comment"># 设置镜像代理</span>
+<span class="prompt">(venv)$ </span><span class="cmd">export HF_ENDPOINT=https://hf-mirror.com</span>
+<span class="comment"># 或手动下载后放到cache目录</span>
+<span class="prompt">(venv)$ </span><span class="cmd">mkdir -p ~/.cache/torch/hub/checkpoints</span>
+<span class="prompt">(venv)$ </span><span class="cmd">wget -O ~/.cache/torch/hub/checkpoints/esm2_t12_35M_UR50D.pt https://dl.fbaipublicfiles.com/fair-esm/models/esm2_t12_35M_UR50D.pt</span>
+</pre>
+
+<h3>Q3: OMP错误（libomp）</h3>
+<pre><span class="comment"># macOS/Linux常见问题</span>
+<span class="prompt">(venv)$ </span><span class="cmd">KMP_DUPLICATE_LIB_OK=TRUE python3 csco_pipeline.py ...</span>
+<span class="comment"># 或者设置环境变量</span>
+<span class="prompt">(venv)$ </span><span class="cmd">export KMP_DUPLICATE_LIB_OK=TRUE</span>
+</pre>
+
+<h3>Q4: 显存不足（OOM）</h3>
+<pre><span class="comment"># 减小batch_size</span>
+<span class="prompt">(venv)$ </span><span class="cmd">python3 csco_pipeline.py ... --batch-size 1</span>
+
+<span class="comment"># 或减少top-n（反事实分析的序列数）</span>
+<span class="prompt">(venv)$ </span><span class="cmd">python3 csco_pipeline.py ... --top-n 1000</span>
+</pre>
+
+<h3>Q5: 中途断开后如何恢复</h3>
+<pre><span class="comment"># 直接重新运行相同命令（加上 --resume）</span>
+<span class="prompt">(venv)$ </span><span class="cmd">KMP_DUPLICATE_LIB_OK=TRUE python3 csco_pipeline.py \</span>
+  <span class="flag">--input</span> <span class="path">~/csco_runs/data/input.csv</span> \
+  <span class="flag">--output</span> <span class="path">~/csco_runs/out</span> \
+  <span class="flag">--work</span> <span class="path">~/csco_runs/work</span> \
+  <span class="flag">--device</span> cuda <span class="flag">--batch-size</span> 4 <span class="flag">--top-n</span> 8000 <span class="flag">--resume</span> \
+  <span class="flag">&gt;</span> <span class="path">~/csco_runs/out/run.log</span> 2&gt;&amp;1 &amp;
+
+<span class="comment"># 查看当前进度</span>
+<span class="prompt">(venv)$ </span><span class="cmd">cat ~/csco_runs/work/pipeline_state.json | python3 -m json.tool</span>
+</pre>
+
+<h3>Q6: 如何确认运行是否完全成功</h3>
+<pre><span class="comment"># 最终成功的标志</span>
+<span class="prompt">server$ </span><span class="cmd">grep "管线完成" ~/csco_runs/out/run.log</span>
+<span class="comment"># 应输出: 管线完成！输出目录: /home/user/csco_runs/out</span>
+
+<span class="comment"># 检查所有6个阶段都完成了</span>
+<span class="prompt">server$ </span><span class="cmd">grep "阶段完成" ~/csco_runs/out/run.log</span>
+<span class="comment"># 应输出6行（对应6个阶段）</span>
+
+<span class="comment"># 检查最终产物是否存在</span>
+<span class="prompt">server$ </span><span class="cmd">ls -lh ~/csco_runs/out/{design_strategy.json,design_strategy.txt,csco_analysis_report.txt,csco_dashboard.png}</span>
+</pre>
+</div>
+
+<div class="footer">
+<p>🧬 CSC-O Pipeline — Causal-Stratified Counterfactual Optimization</p>
+<p>生成时间: 2026-05-28 | 仓库: <a href="https://github.com/poncioponcho/CSC-O" style="color:var(--accent)">github.com/poncioponcho/CSC-O</a></p>
+</div>
+
+</body>
+</html>
