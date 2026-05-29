@@ -4,7 +4,7 @@ import torch
 import os
 import sys
 
-OUTPUT_DIR = './analyze1/output'
+OUTPUT_DIR = './output'
 feat_df = pd.read_csv(os.path.join(OUTPUT_DIR, 'feature_matrix.csv'))
 
 ESM_EMBEDDING_PATH = os.path.join(OUTPUT_DIR, 'esm2_embeddings.npy')

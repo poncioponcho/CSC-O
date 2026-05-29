@@ -15,10 +15,10 @@ warnings.filterwarnings('ignore')
 import os
 import sys
 
-sys.path.insert(0, './analyze1')
+sys.path.insert(0, '.')
 from csco_data_engineering import extract_cdr3_features
 
-OUTPUT_DIR = './analyze1/output'
+OUTPUT_DIR = './output'
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'SimHei', 'DejaVu Sans']

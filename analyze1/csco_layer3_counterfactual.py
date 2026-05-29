@@ -16,7 +16,7 @@ warnings.filterwarnings('ignore')
 import os
 import sys
 
-OUTPUT_DIR = './analyze1/output'
+OUTPUT_DIR = './output'
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'SimHei', 'DejaVu Sans']

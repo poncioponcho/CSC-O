@@ -4,7 +4,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 DATA_PATH = './Q02223_first50_all_sequences(1).csv'
-OUTPUT_DIR = './analyze1/output'
+OUTPUT_DIR = './output'
 
 import os
 os.makedirs(OUTPUT_DIR, exist_ok=True)

@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CSC-O：VPN + 4090 远程托管运行指南</title>
+  <style>
+    :root{
+      --bg:#0b1020; --panel:#121a33; --muted:#9fb0d0; --text:#eaf0ff; --accent:#7aa2ff;
+      --code:#0a0f1f; --border:rgba(255,255,255,.08); --good:#49d17f; --warn:#ffd166;
+    }
+    html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font:14px/1.6 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;}
+    a{color:var(--accent);text-decoration:none}
+    a:hover{text-decoration:underline}
+    .wrap{max-width:980px;margin:0 auto;padding:28px 18px 56px}
+    header{padding:18px 18px;border:1px solid var(--border);background:linear-gradient(180deg,rgba(122,162,255,.12),rgba(18,26,51,.6));border-radius:16px}
+    h1{margin:0 0 8px;font-size:22px;letter-spacing:.2px}
+    .sub{color:var(--muted);margin:0}
+    .grid{display:grid;grid-template-columns:1fr;gap:14px;margin-top:14px}
+    @media (min-width:980px){.grid{grid-template-columns:1fr 1fr}}
+    section{padding:16px 16px;border:1px solid var(--border);background:rgba(18,26,51,.72);border-radius:16px}
+    h2{margin:0 0 10px;font-size:16px}
+    h3{margin:14px 0 8px;font-size:14px;color:var(--muted)}
+    ul{margin:8px 0 0 18px;padding:0}
+    code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
+    pre{margin:10px 0;padding:12px 12px;background:var(--code);border:1px solid var(--border);border-radius:12px;overflow:auto}
+    .pill{display:inline-block;padding:2px 10px;border-radius:999px;border:1px solid var(--border);background:rgba(255,255,255,.03);color:var(--muted);margin-right:8px}
+    .ok{color:var(--good)}
+    .warn{color:var(--warn)}
+    .k{color:#c7d2fe}
+    .note{color:var(--muted);margin:8px 0 0}
+    .hr{height:1px;background:var(--border);margin:14px 0}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>CSC-O：VPN + 4090 远程托管运行指南</h1>
+      <p class="sub">目标：输入你的 10000 条 CSV 数据源，在导师提供的 4090 服务器上（需先连 openconnect VPN）后台执行，并支持随时查看进度与输出。</p>
+      <p class="sub"><span class="pill">仓库入口</span><code>csco_pipeline.py</code>（支持 <code>--input</code>/<code>--device auto</code>/<code>--resume</code>）</p>
+    </header>
+
+    <div class="grid">
+      <section>
+        <h2>1）你需要准备什么</h2>
+        <ul>
+          <li><span class="k">本地</span>已安装并配置好 <code>openconnect</code>（校内 VPN）。</li>
+          <li><span class="k">远程 4090 服务器</span>：导师提供的 <span class="k">IP</span>、<span class="k">账号</span>、<span class="k">密码</span>（建议后续改为 SSH key）。</li>
+          <li><span class="k">数据</span>：你的 <code>CSV</code>（10000 行）。</li>
+        </ul>
+        <div class="hr"></div>
+        <h3>CSV 最低要求（强烈建议）</h3>
+        <p class="note">
+          管线会自动做列名别名映射与补齐缺失列，但为了避免“有效数据不足”报错，建议确保至少这些列存在且不全为空：
+          <code>vh_sequence</code>（或 <code>full_sequence</code> / <code>sequence</code> / <code>seq</code>）、
+          <code>rf2_pred_lddt</code>（或 <code>plddt</code>）、
+          <code>rf2_interaction_pae</code>（或 <code>pae</code>）。
+        </p>
+        <p class="note warn"><b>注意：</b>如果 <code>rf2_pred_lddt</code> / <code>rf2_interaction_pae</code> 两列几乎都为空，会触发：<code>有效数据不足，需要至少50条有RF2指标的记录</code>。</p>
+      </section>
+
+      <section>
+        <h2>2）本地开启 VPN（openconnect）</h2>
+        <p class="note">你说本地已配置好校内 VPN，这里只给出“后台运行”的常用写法（按你的实际配置替换）。</p>
+        <pre><code># 示例：后台开启 VPN（按你现有校内 VPN 配置替换）
+# 方式A：nohup（适合简单场景）
+nohup sudo openconnect &lt;你的VPN地址或配置&gt; &gt; vpn.log 2&gt;&amp;1 &amp;
+
+# 方式B：tmux（推荐，掉线后可重新 attach）
+tmux new -s vpn
+sudo openconnect &lt;你的VPN地址或配置&gt;
+# 按 Ctrl+b 再按 d 退出到后台
+</code></pre>
+        <p class="note ok"><b>验证 VPN：</b>连上后再执行后面的 <code>ssh</code>，能通就说明链路 OK。</p>
+      </section>
+    </div>
+
+    <section style="margin-top:14px">
+      <h2>3）连接 4090 服务器（SSH）</h2>
+      <p class="note">把下面的占位符替换成导师给你的信息：</p>
+      <pre><code># 推荐：第一次连接时确认指纹（不要无脑 yes）
+ssh &lt;USER&gt;@&lt;IP&gt;
+
+# 如果必须用密码（不推荐长期这样），会提示你输入密码
+# 建议后续改成 SSH Key + 禁用密码登录（由管理员/导师决定）</code></pre>
+      <div class="hr"></div>
+      <h3>在服务器上做一次 GPU/环境检查</h3>
+      <pre><code># 4090 是否可用
+nvidia-smi
+
+# python 是否存在
+python3 --version || python --version
+</code></pre>
+    </section>
+
+    <div class="grid">
+      <section>
+        <h2>4）把 CSV 上传到服务器</h2>
+        <p class="note">建议在服务器上建一个固定工作目录（例如 <code>~/csco_runs</code>）。</p>
+        <pre><code># 在服务器上
+mkdir -p ~/csco_runs/data ~/csco_runs/out ~/csco_runs/work
+</code></pre>
+        <p class="note">然后从本地把 CSV 传上去（任选一种）：</p>
+        <pre><code># 本地执行（scp）
+scp "/path/to/your_10000.csv" &lt;USER&gt;@&lt;IP&gt;:~/csco_runs/data/input.csv
+
+# 或者 rsync（断点续传更稳）
+rsync -avP "/path/to/your_10000.csv" &lt;USER&gt;@&lt;IP&gt;:~/csco_runs/data/input.csv
+</code></pre>
+      </section>
+
+      <section>
+        <h2>5）把代码同步到服务器</h2>
+        <p class="note">有两种常用方式：</p>
+        <ul>
+          <li><b>方式A（推荐）</b>：服务器上 <code>git clone</code> 你的仓库（需要仓库可访问）。</li>
+          <li><b>方式B</b>：本地用 <code>rsync</code> 把整个代码目录同步过去（适合私有/无 git 访问）。</li>
+        </ul>
+        <pre><code># 方式B：从本地同步当前仓库到服务器（排除 output/work 等大文件目录）
+rsync -avP --exclude "output/" --exclude "work/" --exclude "__pycache__/" \
+  "./analyze1/" \
+  &lt;USER&gt;@&lt;IP&gt;:~/csco_runs/repo/
+</code></pre>
+      </section>
+    </div>
+
+    <section style="margin-top:14px">
+      <h2>6）在服务器上安装依赖（一次性）</h2>
+      <p class="note">本仓库在 ESM-2、lifelines、lightgbm、sklearn、matplotlib/seaborn 等处会用到第三方库。最稳妥做法是用虚拟环境。</p>
+      <pre><code># 在服务器上
+cd ~/csco_runs/repo
+
+python3 -m venv .venv
+source .venv/bin/activate
+
+# 基础依赖（如服务器已预装可跳过对应项）
+python -m pip install -U pip wheel setuptools
+python -m pip install pandas numpy matplotlib seaborn scikit-learn scipy lifelines lightgbm
+
+# ESM-2 相关（可能需要 torch + esm）
+# torch 安装方式依赖 CUDA/驱动环境，若服务器已装好 torch+cuda 可先跳过
+python -m pip install fair-esm
+</code></pre>
+      <p class="note warn"><b>注意：</b>torch 的 CUDA 版安装命令与服务器 CUDA/驱动版本强相关。如果这里卡住，最有效的排查顺序是：<code>nvidia-smi</code> → <code>python -c "import torch; print(torch.cuda.is_available())"</code>。</p>
+    </section>
+
+    <section style="margin-top:14px">
+      <h2>7）后台运行（托管在云端）</h2>
+      <p class="note">推荐用 <code>tmux</code> 托管训练/推理进程：断开 SSH 不会中断；随时能 attach 回去看日志。</p>
+      <pre><code># 在服务器上
+cd ~/csco_runs/repo
+source .venv/bin/activate
+
+tmux new -s csco
+
+# 在 tmux 里执行（用 4090：--device cuda；断点续跑：--resume）
+python csco_pipeline.py \
+  --input ~/csco_runs/data/input.csv \
+  --output ~/csco_runs/out \
+  --work ~/csco_runs/work \
+  --device cuda \
+  --batch-size 4 \
+  --top-n 2000 \
+  --resume \
+  &gt; ~/csco_runs/out/run.log 2&gt;&amp;1
+
+# 按 Ctrl+b 再按 d：把 tmux 放到后台
+</code></pre>
+      <p class="note">随时回来看：</p>
+      <pre><code># 重新连接
+tmux attach -t csco
+
+# 查看 tmux 会话列表
+tmux ls
+</code></pre>
+    </section>
+
+    <section style="margin-top:14px">
+      <h2>8）随时查看：用网页浏览输出目录（推荐：SSH 端口转发）</h2>
+      <p class="note">
+        最简单的“云端可随时查看”方式：在服务器上用 <code>python -m http.server</code> 把输出目录起一个只在服务器本地监听的静态文件服务，
+        然后通过 SSH 端口转发在本地浏览器打开。
+      </p>
+      <pre><code># 服务器上：起一个只监听 127.0.0.1 的静态文件服务（更安全）
+cd ~/csco_runs/out
+tmux new -s csco-http
+python -m http.server 8000 --bind 127.0.0.1
+# Ctrl+b d 退出到后台
+</code></pre>
+      <pre><code># 本地：做 SSH 端口转发（保持该终端窗口不关）
+ssh -L 8000:127.0.0.1:8000 &lt;USER&gt;@&lt;IP&gt;
+
+# 然后本地浏览器打开：
+# http://127.0.0.1:8000/
+# 你可以直接点开 run.log、以及输出的 png/csv/json/txt</code></pre>
+      <p class="note warn"><b>安全提醒：</b>不要把 <code>http.server</code> 直接绑定到 <code>0.0.0.0</code> 并暴露公网端口，除非你非常确认服务器防火墙/访问控制已正确配置。</p>
+    </section>
+
+    <section style="margin-top:14px">
+      <h2>9）常见问题（快速排查）</h2>
+      <h3>（A）提示有效数据不足</h3>
+      <pre><code># 检查 CSV 列名（在服务器上）
+python - &lt;&lt;'PY'
+import pandas as pd
+df = pd.read_csv("/home/&lt;USER&gt;/csco_runs/data/input.csv")
+print(df.columns.tolist()[:50])
+print("n_rows:", len(df))
+print("non_na rf2_pred_lddt:", df.get("rf2_pred_lddt", pd.Series([])).notna().sum())
+print("non_na rf2_interaction_pae:", df.get("rf2_interaction_pae", pd.Series([])).notna().sum())
+PY
+</code></pre>
+      <p class="note">如果你的列叫 <code>plddt</code>/<code>pae</code> 也可以；入口脚本会做别名映射。</p>
+
+      <h3>（B）ESM-2 很慢或 OOM</h3>
+      <ul>
+        <li>把 <code>--batch-size</code> 调小（例如 1 或 2）。</li>
+        <li>确认在 4090 上跑：<code>--device cuda</code>，且 <code>nvidia-smi</code> 能看到进程占用。</li>
+      </ul>
+
+      <h3>（C）断线后如何继续</h3>
+      <ul>
+        <li>只要你用的是 <code>tmux</code>，断线不影响运行；重新 SSH 后 <code>tmux attach -t csco</code> 即可。</li>
+        <li>管线支持断点续跑：加 <code>--resume</code>，会自动跳过已完成阶段（状态在 <code>work/pipeline_state.json</code>）。</li>
+      </ul>
+    </section>
+
+    <section style="margin-top:14px">
+      <h2>10）你最终会得到哪些输出</h2>
+      <ul>
+        <li><b>核心表</b>：<code>feature_matrix.csv</code>、<code>survival_data.csv</code></li>
+        <li><b>ESM-2</b>：<code>esm2_embeddings.npy</code>（非常大）</li>
+        <li><b>反事实建议</b>：<code>counterfactual_suggestions.csv</code>、<code>truncation_suggestions.csv</code></li>
+        <li><b>策略汇总</b>：<code>design_strategy.json</code>、<code>design_strategy.txt</code>、<code>csco_analysis_report.txt</code></li>
+        <li><b>图</b>：<code>*.png</code>（漏斗、森林图、t-SNE、热图等）</li>
+      </ul>
+    </section>
+
+    <section style="margin-top:14px">
+      <h2>附：你可以直接复制的“一键运行清单”</h2>
+      <pre><code># 本地（先开 VPN）
+nohup sudo openconnect &lt;你的VPN配置&gt; &gt; vpn.log 2&gt;&amp;1 &amp;
+
+# 本地（上传数据）
+scp "/path/to/your_10000.csv" &lt;USER&gt;@&lt;IP&gt;:~/csco_runs/data/input.csv
+
+# 本地（同步代码）
+rsync -avP --exclude "output/" --exclude "work/" --exclude "__pycache__/" \
+  "./analyze1/" \
+  &lt;USER&gt;@&lt;IP&gt;:~/csco_runs/repo/
+
+# 服务器（后台跑）
+cd ~/csco_runs/repo
+python3 -m venv .venv &amp;&amp; source .venv/bin/activate
+python -m pip install -U pip wheel setuptools
+python -m pip install pandas numpy matplotlib seaborn scikit-learn scipy lifelines lightgbm fair-esm
+
+tmux new -s csco
+python csco_pipeline.py --input ~/csco_runs/data/input.csv --output ~/csco_runs/out --work ~/csco_runs/work --device cuda --resume \
+  &gt; ~/csco_runs/out/run.log 2&gt;&amp;1
+
+# 服务器（开网页浏览输出）
+cd ~/csco_runs/out
+tmux new -s csco-http
+python -m http.server 8000 --bind 127.0.0.1
+
+# 本地（端口转发后用浏览器看）
+ssh -L 8000:127.0.0.1:8000 &lt;USER&gt;@&lt;IP&gt;
+# 浏览器： http://127.0.0.1:8000/</code></pre>
+      <p class="note">把 <code>&lt;USER&gt;</code>/<code>&lt;IP&gt;</code>/<code>&lt;你的VPN配置&gt;</code> 换成导师/学校给你的实际值即可。</p>
+    </section>
+  </div>
+</body>
+</html>

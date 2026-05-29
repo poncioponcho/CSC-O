@@ -29,6 +29,16 @@ work/
 .vscode/
 .idea/
 
+# 排除敏感文档
+开源的靶点数据源.docx
+药物研发中的因果推断.docx
+
+# 排除含硬编码凭据的脚本
+run_csc_o_remote.sh
+
+# 排除实验数据CSV
+*.csv
+
 # 排除环境配置
 .env
 venv/

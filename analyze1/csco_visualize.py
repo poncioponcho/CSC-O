@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import os
 
-OUTPUT_DIR = './analyze1/output'
+OUTPUT_DIR = './output'
 feat_df = pd.read_csv(os.path.join(OUTPUT_DIR, 'feature_matrix.csv'))
 
 plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'SimHei', 'DejaVu Sans']

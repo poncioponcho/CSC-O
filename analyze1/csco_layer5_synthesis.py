@@ -3,7 +3,7 @@ import numpy as np
 import json
 import os
 
-OUTPUT_DIR = './analyze1/output'
+OUTPUT_DIR = './output'
 
 feat_df = pd.read_csv(os.path.join(OUTPUT_DIR, 'feature_matrix.csv'))
 
