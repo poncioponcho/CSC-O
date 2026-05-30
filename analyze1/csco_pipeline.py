@@ -177,6 +177,8 @@ class ProgressTracker:
         self.work_dir = Path(work_dir)
         self.work_dir.mkdir(parents=True, exist_ok=True)
         self.state_file = self.work_dir / "pipeline_state.json"
+        self.notify_dir = self.work_dir / "notifications"
+        self.notify_dir.mkdir(parents=True, exist_ok=True)
         self.state = self._load()
 
     def _load(self):
@@ -188,6 +190,23 @@ class ProgressTracker:
     def save(self):
         with open(self.state_file, 'w') as f:
             json.dump(self.state, f, indent=2, default=str)
+
+    def _notify(self, event_type, stage, detail=""):
+        """写入人类可读的通知文件，供外部工具(VPN断连恢复系统)读取"""
+        notify_file = self.notify_dir / f"{event_type}_{stage}_{int(time.time())}.txt"
+        lines = [
+            f"EVENT: {event_type}",
+            f"STAGE: {stage}",
+            f"TIME: {datetime.now().isoformat()}",
+            f"DETAIL: {detail}",
+            f"COMPLETED: {[s['name'] for s in self.state.get('completed_stages', [])]}",
+        ]
+        with open(notify_file, 'w') as f:
+            f.write('\n'.join(lines))
+        # 同时更新一个固定的最新状态文件，方便快速读取
+        latest_file = self.notify_dir / "LATEST_STATUS.txt"
+        with open(latest_file, 'w') as f:
+            f.write(f"[{datetime.now().strftime('%H:%M:%S')}] {event_type}: {stage}\n")
 
     def is_completed(self, name):
         return name in [s["name"] for s in self.state["completed_stages"]]
@@ -209,6 +228,10 @@ class ProgressTracker:
         })
         self.state["current_stage"] = None
         self.save()
+        detail = f"耗时 {elapsed:.1f}s"
+        if metrics:
+            detail += f" | metrics={metrics}"
+        self._notify("COMPLETE", name, detail)
         print(f"<<< 阶段完成: {name} | 耗时: {elapsed:.1f}s\n")
 
     def log_error(self, stage, error):
@@ -219,6 +242,7 @@ class ProgressTracker:
             "traceback": traceback.format_exc()
         })
         self.save()
+        self._notify("ERROR", stage, str(error)[:200])
 
 # ═══════════════════════════════════════════════════════════════
 # 数据适配层
