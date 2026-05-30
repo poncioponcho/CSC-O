@@ -198,7 +198,24 @@ ssh -L 8000:127.0.0.1:8000 &lt;USER&gt;@&lt;IP&gt;
 
     <section style="margin-top:14px">
       <h2>9）常见问题（快速排查）</h2>
-      <h3>（A）提示有效数据不足</h3>
+
+      <h3>（A）VPN 连通但 SSH banner / HTTPS TLS 握手超时</h3>
+      <p class="note warn"><b>典型症状：</b>ping 通、TCP 22/443 能建立连接，但 SSH 卡在 "banner exchange"、HTTPS 卡在 "TLS handshake"。</p>
+      <p class="note">这几乎一定是 <b>MTU 过大导致大包被静默丢弃</b>。openconnect 默认 MTU 可能为 1500，但校园网/PPPoE 实际承载能力只有 1280~1400。</p>
+      <pre><code># 快速修复：降低 VPN 接口 MTU（临时，立即生效）
+sudo ifconfig utun4 mtu 1280
+
+# 长期修复：重新连接时指定 MTU
+sudo openconnect --mtu 1280 &lt;你的VPN地址&gt;
+
+# 诊断脚本（自动找瓶颈）
+# 先给脚本执行权限，然后传入 4090 服务器 IP
+chmod +x vpn_diagnose.sh
+./vpn_diagnose.sh &lt;4090服务器IP&gt;
+</code></pre>
+      <p class="note">脚本会先用 <code>ping -D -s</code> 二分查找最大安全包大小，然后提供一键修复。</p>
+
+      <h3>（B）提示有效数据不足</h3>
       <pre><code># 检查 CSV 列名（在服务器上）
 python - &lt;&lt;'PY'
 import pandas as pd
@@ -211,13 +228,13 @@ PY
 </code></pre>
       <p class="note">如果你的列叫 <code>plddt</code>/<code>pae</code> 也可以；入口脚本会做别名映射。</p>
 
-      <h3>（B）ESM-2 很慢或 OOM</h3>
+      <h3>（C）ESM-2 很慢或 OOM</h3>
       <ul>
         <li>把 <code>--batch-size</code> 调小（例如 1 或 2）。</li>
         <li>确认在 4090 上跑：<code>--device cuda</code>，且 <code>nvidia-smi</code> 能看到进程占用。</li>
       </ul>
 
-      <h3>（C）断线后如何继续</h3>
+      <h3>（D）断线后如何继续</h3>
       <ul>
         <li>只要你用的是 <code>tmux</code>，断线不影响运行；重新 SSH 后 <code>tmux attach -t csco</code> 即可。</li>
         <li>管线支持断点续跑：加 <code>--resume</code>，会自动跳过已完成阶段（状态在 <code>work/pipeline_state.json</code>）。</li>

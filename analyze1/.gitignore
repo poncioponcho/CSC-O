@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+.env/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project outputs (generated data & large files)
+output/
+work/
+*.npy
+
+# Sensitive configs
+服务器配置记录.md
+服务器*配置*.md
+*配置记录*.md
+*.docx
+
+# Logs
+*.log
+vpn.log
+
+# Keep docs and source
+!docs/
+!*.py

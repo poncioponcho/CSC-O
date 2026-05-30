@@ -46,6 +46,11 @@ X_all = embeddings.copy()
 Y_binary = feat_df['rf2_passed'].values.astype(int)
 Y_pae = feat_df['rf2_interaction_pae'].values.astype(float)
 
+# 构造有意义的二元 treatment 变量（避免 treatment=outcome 的无意义调用）
+feat_df['first_is_aromatic'] = feat_df['first_residue'].isin(['Y', 'W', 'F']).astype(int)
+feat_df['last_is_YH'] = feat_df['last_residue'].isin(['Y', 'H']).astype(int)
+T_first_aromatic = feat_df['first_is_aromatic'].values
+
 print('\n--- 3.2 Double ML: CATE估计 ---')
 
 def double_ml_cate(X, T, Y, n_folds=5):
@@ -92,7 +97,8 @@ def double_ml_cate(X, T, Y, n_folds=5):
     return cate_estimates, t_stats
 
 print('Running Double ML for RF2 pass (binary outcome)...')
-cate_binary, tstat_binary = double_ml_cate(X_all, Y_binary, Y_binary)
+print('  Treatment: first_is_aromatic (CDR3 first residue is Y/W/F)')
+cate_binary, tstat_binary = double_ml_cate(X_all, T_first_aromatic, Y_binary)
 print(f'  Mean CATE: {cate_binary.mean():.4f}')
 print(f'  Significant (|t|>2.0): {np.sum(np.abs(tstat_binary) > 2.0)} / {len(tstat_binary)}')
 
@@ -281,9 +287,9 @@ for i in range(min(2000, len(failed_idx))):
         truncated = cdr3[:target_len]
         new_feats = extract_cdr3_features(truncated)
 
-        len6_pass_rate = 0.226
-        len7_pass_rate = 0.516
-        predicted_rate = len6_pass_rate if target_len == 6 else len7_pass_rate
+        # 从实际数据动态计算该长度的通过率（作为截短后预测通过率的依据）
+        len_pass_rate = feat_df[feat_df['cdr3_len'] == target_len]['rf2_passed'].mean()
+        predicted_rate = float(len_pass_rate) if not pd.isna(len_pass_rate) else 0.0
 
         truncation_results.append({
             'sequence_id': int(fail_row['global_sequence_index']),
