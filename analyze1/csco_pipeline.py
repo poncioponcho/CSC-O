@@ -34,7 +34,10 @@ DEFAULT_CONFIG = {
     "esm2_model": "esm2_t12_35M_UR50D",
     "esm2_models": ["esm2_t12_35M_UR50D"],
     "esm2_fusion": "concat",
+    "esm2_pca_dim": 256,
     "esm2_batch_size": 4,
+    "cate_method": "causal_forest",
+    "subgroup_n_clusters": 3,
     "device": "auto",
     "max_cdr3_len": 13,
     "truncation_target": 7,
@@ -901,10 +904,52 @@ def stage_layer3_counterfactual(output_dir, config):
     Y_pae = feat_df['rf2_interaction_pae'].values.astype(float)
     print(f"  RF2失败: {len(failed_idx)}, 通过: {len(passed_idx)}")
 
-    def double_ml_cate(X, T, Y, n_folds=5):
-        n = len(Y); cate = np.zeros(n); t_stats = np.zeros(n)
+    def double_ml_cate(X, T, Y, n_folds=5, method="causal_forest"):
+        n = len(Y); cate = np.zeros(n); t_stats = np.zeros(n); se_arr = np.zeros(n)
         kf = KFold(n_splits=n_folds, shuffle=True, random_state=42)
-        for _, (train_idx, test_idx) in enumerate(kf.split(X)):
+        if method == "causal_forest":
+            try:
+                from econml.dml import CausalForestDML
+                from sklearn.ensemble import GradientBoostingRegressor, GradientBoostingClassifier
+                cf = CausalForestDML(
+                    model_y=GradientBoostingRegressor(n_estimators=100, max_depth=3, learning_rate=0.05, random_state=42),
+                    model_t=GradientBoostingClassifier(n_estimators=100, max_depth=3, learning_rate=0.05, random_state=42),
+                    n_estimators=1000, max_depth=5, min_samples_leaf=10,
+                    random_state=42, cv=5, n_jobs=-1,
+                )
+                cf.fit(Y, T, X=X, W=None)
+                cate = cf.effect(X).flatten()
+                se_arr = cf.effect_inference(X).var.tolist()
+                se_arr = np.sqrt(np.array(se_arr))
+                t_stats = cate / np.where(se_arr > 1e-8, se_arr, 1e-8)
+                print(f"    CausalForestDML: CATE range [{cate.min():.3f}, {cate.max():.3f}], mean={cate.mean():.3f}")
+                return cate, t_stats, se_arr
+            except ImportError:
+                print("    econml未安装, 降级到R-learner")
+                method = "r_learner"
+        if method == "r_learner":
+            for fold_i, (train_idx, test_idx) in enumerate(kf.split(X)):
+                X_tr, X_te = X[train_idx], X[test_idx]
+                T_tr, T_te = T[train_idx], T[test_idx]
+                Y_tr, Y_te = Y[train_idx], Y[test_idx]
+                m_y = lgb.LGBMRegressor(n_estimators=200, max_depth=5, learning_rate=0.05, verbose=-1, random_state=42)
+                m_y.fit(X_tr, Y_tr); Y_resid = Y_te - m_y.predict(X_te)
+                m_t = lgb.LGBMClassifier(n_estimators=200, max_depth=5, learning_rate=0.05, verbose=-1, random_state=42)
+                m_t.fit(X_tr, T_tr); T_resid = T_te - m_t.predict_proba(X_te)[:, 1]
+                ss = np.sum(T_resid**2)
+                if ss < 1e-8: continue
+                cate_fold = Y_resid * T_resid / (T_resid**2 + 1e-6)
+                from sklearn.ensemble import GradientBoostingRegressor as GBR
+                hetero_model = GBR(n_estimators=100, max_depth=3, learning_rate=0.05, random_state=42)
+                hetero_model.fit(X_te, cate_fold)
+                cate[test_idx] = hetero_model.predict(X)
+                residuals = Y_resid - cate[test_idx] * T_resid
+                fold_se = np.sqrt(np.sum(residuals**2) / (n-1) / max(ss, 1e-8))
+                se_arr[test_idx] = fold_se
+                t_stats[test_idx] = cate[test_idx] / fold_se if fold_se > 0 else 0
+            print(f"    R-learner: CATE range [{cate.min():.3f}, {cate.max():.3f}], mean={cate.mean():.3f}")
+            return cate, t_stats, se_arr
+        for fold_i, (train_idx, test_idx) in enumerate(kf.split(X)):
             X_tr, X_te = X[train_idx], X[test_idx]
             T_tr, T_te = T[train_idx], T[test_idx]
             Y_tr, Y_te = Y[train_idx], Y[test_idx]
@@ -918,12 +963,61 @@ def stage_layer3_counterfactual(output_dir, config):
             cate[test_idx] = theta
             residuals = Y_resid - theta * T_resid
             se = np.sqrt(np.sum(residuals**2) / (n-1) / ss)
+            se_arr[test_idx] = se
             t_stats[test_idx] = theta / se if se > 0 else 0
-        return cate, t_stats
+        print(f"    PLR Double ML: CATE={cate.mean():.3f} (constant)")
+        return cate, t_stats, se_arr
 
-    cate_pae, tstat_pae = double_ml_cate(X_all, Y_binary, Y_pae)
+    cate_method = config.get("cate_method", "causal_forest")
+    cate_pae, tstat_pae, se_pae = double_ml_cate(X_all, Y_binary, Y_pae, method=cate_method)
     np.save(out / 'cate_pae.npy', cate_pae)
     np.save(out / 'tstat_pae.npy', tstat_pae)
+    np.save(out / 'se_pae.npy', se_pae)
+
+    multi_treatment_results = []
+    treatment_cols = [c for c in ['first_is_aromatic', 'glycine_ratio', 'serine_ratio', 'cdr3_len', 'proline_count', 'last_is_YH'] if c in feat_df.columns]
+    confounder_cols = [c for c in ['backbone_id', 'aromatic_ratio', 'hydrophobic_ratio', 'positive_ratio'] if c in feat_df.columns]
+    for t_col in treatment_cols:
+        T_var = feat_df[t_col].values
+        if T_var.std() < 1e-8: continue
+        T_binary = (T_var > np.median(T_var)).astype(int) if T_var.dtype != int and len(set(T_var)) > 5 else T_var.astype(int)
+        X_conf = X_all.copy()
+        if confounder_cols:
+            conf_data = pd.get_dummies(feat_df[confounder_cols], drop_first=True).values
+            X_conf = np.hstack([X_all, conf_data])
+        cate_t, tstat_t, se_t = double_ml_cate(X_conf, T_binary, Y_pae, method=cate_method)
+        multi_treatment_results.append({
+            'treatment': t_col, 'cate_mean': float(np.mean(cate_t)),
+            'cate_std': float(np.std(cate_t)), 'cate_min': float(np.min(cate_t)),
+            'cate_max': float(np.max(cate_t)), 'n_significant': int(np.sum(np.abs(tstat_t) > 1.96)),
+            'pct_significant': float(np.mean(np.abs(tstat_t) > 1.96) * 100),
+        })
+    pd.DataFrame(multi_treatment_results).to_csv(out / 'multi_treatment_cate.csv', index=False)
+
+    n_clusters = config.get("subgroup_n_clusters", 3)
+    from sklearn.cluster import KMeans
+    from sklearn.preprocessing import StandardScaler
+    if cate_pae.std() > 1e-6:
+        cate_2d = StandardScaler().fit_transform(cate_pae.reshape(-1, 1))
+        km = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+        subgroup_labels = km.fit_predict(cate_2d)
+        np.save(out / 'subgroup_labels.npy', subgroup_labels)
+        subgroup_profiles = []
+        for sg in range(n_clusters):
+            mask = subgroup_labels == sg
+            sg_data = feat_df[mask]
+            profile = {
+                'subgroup': sg, 'size': int(mask.sum()),
+                'rf2_pass_rate': float(sg_data['rf2_passed'].mean()) if 'rf2_passed' in sg_data.columns else 0,
+                'mean_pae': float(sg_data['rf2_interaction_pae'].mean()) if 'rf2_interaction_pae' in sg_data.columns else 0,
+                'mean_cate': float(cate_pae[mask].mean()),
+                'mean_cdr3_len': float(sg_data['cdr3_len'].mean()) if 'cdr3_len' in sg_data.columns else 0,
+                'aromatic_ratio': float(sg_data['aromatic_ratio'].mean()) if 'aromatic_ratio' in sg_data.columns else 0,
+                'glycine_ratio': float(sg_data['glycine_ratio'].mean()) if 'glycine_ratio' in sg_data.columns else 0,
+            }
+            subgroup_profiles.append(profile)
+        pd.DataFrame(subgroup_profiles).to_csv(out / 'subgroup_profiles.csv', index=False)
+        print(f"  亚群分析: {n_clusters}个亚群, 大小={[p['size'] for p in subgroup_profiles]}")
 
     pos_cate_results = []
     for pos in range(config.get("max_cdr3_len", 13)):
@@ -970,6 +1064,8 @@ def stage_layer3_counterfactual(output_dir, config):
         row = feat_df.iloc[failed_idx[i]]
         cdr3 = row['cdr3_sequence']
         if pd.isna(cdr3) or len(cdr3) == 0: continue
+        seq_cate = cate_pae[failed_idx[i]]
+        seq_se = se_pae[failed_idx[i]] if se_pae[failed_idx[i]] > 0 else 1.0
         suggestions = []
         for pos in range(min(len(cdr3), 13)):
             for aa in AMINO_ACIDS:
@@ -984,10 +1080,14 @@ def stage_layer3_counterfactual(output_dir, config):
         for rank, s in enumerate(suggestions[:3]):
             nn_idx = nn_indices[i, 0]
             succ_cdr3 = str(feat_df.iloc[passed_idx[nn_idx]]['cdr3_sequence'])
+            is_significant = abs(seq_cate / seq_se) > 1.96 if seq_se > 0 else False
             cf_suggestions.append({
                 'sequence_id': int(row['global_sequence_index']), 'original_cdr3': cdr3,
                 'rank': rank+1, 'edit': f"Pos{s['pos']} {s['orig']}->{s['mut']}",
                 'mutated_cdr3': s['cdr3'], 'predicted_pae_change': round(s['pae'], 2),
+                'individual_cate': round(float(seq_cate), 3),
+                'individual_se': round(float(seq_se), 3),
+                'is_significant': is_significant,
                 'edit_distance_to_template': sum(a!=b for a,b in zip(s['cdr3'], succ_cdr3)) if len(s['cdr3'])==len(succ_cdr3) else -1,
                 'nearest_success_cdr3': succ_cdr3,
             })
@@ -1230,6 +1330,8 @@ if __name__ == "__main__":
     parser.add_argument("--esm2-models", type=str, default=None, help="ESM-2模型列表(逗号分隔), 如 esm2_t12_35M_UR50D,esm2_t30_150M_UR50D")
     parser.add_argument("--esm2-fusion", type=str, default="concat", choices=["concat","average","pca_concat"], help="多模型嵌入融合策略")
     parser.add_argument("--esm2-pca-dim", type=int, default=256, help="PCA降维目标维度(pca_concat策略)")
+    parser.add_argument("--cate-method", type=str, default="causal_forest", choices=["causal_forest","r_learner","plr"], help="CATE估计方法")
+    parser.add_argument("--subgroup-clusters", type=int, default=3, help="亚群聚类数")
     args = parser.parse_args()
 
     config = DEFAULT_CONFIG.copy()
@@ -1242,6 +1344,8 @@ if __name__ == "__main__":
     config["counterfactual_top_n"] = args.top_n
     config["esm2_fusion"] = args.esm2_fusion
     config["esm2_pca_dim"] = args.esm2_pca_dim
+    config["cate_method"] = args.cate_method
+    config["subgroup_n_clusters"] = args.subgroup_clusters
     if args.esm2_models:
         config["esm2_models"] = [m.strip() for m in args.esm2_models.split(",")]
         config["esm2_model"] = config["esm2_models"][0]
