@@ -2,7 +2,7 @@
 # Check Server Status — Mac 端一键查询服务器 pipeline 运行状态
 # 用法: ./check_server_status.sh
 
-SERVER_IP="${SERVER_IP:-49.52.29.0}"
+SERVER_IP="${SERVER_IP:-REDACTED_IP}"
 SERVER_USER="${SERVER_USER:-test}"
 
 echo "========================================"

@@ -2,7 +2,7 @@
 # SSH Auto Attach — VPN恢复后一键连接服务器并恢复工作区
 # 用法: ./ssh_auto_attach.sh [session_name]
 
-SERVER_IP="${SERVER_IP:-49.52.29.0}"
+SERVER_IP="${SERVER_IP:-REDACTED_IP}"
 SERVER_USER="${SERVER_USER:-test}"
 TMUX_SESSION="${1:-csco}"
 

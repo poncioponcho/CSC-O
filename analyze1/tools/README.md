@@ -107,7 +107,7 @@ python3 workspace_restore.py
 可在 `~/.bashrc` 或 `~/.zshrc` 中预设：
 
 ```bash
-export VPNWD_SERVER_IP="49.52.29.0"
+export VPNWD_SERVER_IP="REDACTED_IP"
 export VPNWD_SERVER_USER="test"
 export VPNWD_SESSION="csco"
 export VPNWD_INTERVAL="5"

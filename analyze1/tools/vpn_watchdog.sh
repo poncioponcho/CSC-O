@@ -14,7 +14,7 @@
 # ═══════════════════════════════════════════════════════════════
 # 配置区
 # ═══════════════════════════════════════════════════════════════
-SERVER_IP="${VPNWD_SERVER_IP:-49.52.29.0}"
+SERVER_IP="${VPNWD_SERVER_IP:-REDACTED_IP}"
 SERVER_USER="${VPNWD_SERVER_USER:-test}"
 TMUX_SESSION="${VPNWD_SESSION:-csco}"
 CHECK_INTERVAL="${VPNWD_INTERVAL:-5}"
