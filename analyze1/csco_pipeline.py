@@ -32,12 +32,21 @@ DEFAULT_CONFIG = {
     "work_dir": "./work",
     "stage_resume": True,
     "esm2_model": "esm2_t12_35M_UR50D",
+    "esm2_models": ["esm2_t12_35M_UR50D"],
+    "esm2_fusion": "concat",
     "esm2_batch_size": 4,
     "device": "auto",
     "max_cdr3_len": 13,
     "truncation_target": 7,
     "counterfactual_top_n": 2000,
     "tsne_sample_size": 3000,
+}
+
+ESM2_MODEL_REGISTRY = {
+    "esm2_t12_35M_UR50D":  {"layers": 12, "dim": 480},
+    "esm2_t30_150M_UR50D": {"layers": 30, "dim": 640},
+    "esm2_t33_650M_UR50D": {"layers": 33, "dim": 1280},
+    "esm2_t36_3B_UR50D":   {"layers": 36, "dim": 2560},
 }
 
 STAGE_NAMES = [
@@ -752,38 +761,17 @@ def stage_layer2_causal(output_dir, config):
 # 阶段4: ESM-2编码
 # ═══════════════════════════════════════════════════════════════
 
-def stage_esm2_encode(output_dir, config):
-    import torch
-    out = Path(output_dir)
-    embed_path = out / "esm2_embeddings.npy"
-    if embed_path.exists():
-        embeddings = np.load(embed_path)
-        print(f"  ESM-2嵌入已存在: {embeddings.shape}")
-        return {"embed_shape": list(embeddings.shape)}
-
-    feat_df = pd.read_csv(out / "feature_matrix.csv")
-    import esm
-    model_name = config.get("esm2_model", "esm2_t12_35M_UR50D")
+def _encode_single_model(model_name, sequences, device, batch_size):
+    import torch, esm
     model, alphabet = esm.pretrained.load_model_and_alphabet(model_name)
     batch_converter = alphabet.get_batch_converter()
     model.eval()
-
-    if config["device"] == "auto":
-        if torch.backends.mps.is_available(): device = torch.device("mps")
-        elif torch.cuda.is_available(): device = torch.device("cuda")
-        else: device = torch.device("cpu")
-    else:
-        device = torch.device(config["device"])
-    print(f"  设备: {device}")
     model = model.to(device)
-
-    sequences = feat_df['vh_sequence'].values
     n_seqs = len(sequences)
-    repr_layers = [12] if 't12' in model_name else [max(model.num_layers, 1)]
-    embed_dim = model.embed_dim
+    info = ESM2_MODEL_REGISTRY.get(model_name, {"layers": model.num_layers, "dim": model.embed_dim})
+    repr_layers = [info["layers"]]
+    embed_dim = info["dim"]
     embeddings = np.zeros((n_seqs, embed_dim), dtype=np.float32)
-    batch_size = config.get("esm2_batch_size", 4)
-
     for start in range(0, n_seqs, batch_size):
         end = min(start + batch_size, n_seqs)
         batch_seqs = [(f'seq_{i}', str(sequences[i])) for i in range(start, end)]
@@ -808,11 +796,84 @@ def stage_esm2_encode(output_dir, config):
                     print(f"  序列 {i} 编码失败: {e2}")
                     embeddings[i] = np.zeros(embed_dim, dtype=np.float32)
         if (start // batch_size) % 50 == 0:
-            print(f"  进度: {end}/{n_seqs} ({end/n_seqs*100:.1f}%)")
+            print(f"    [{model_name}] 进度: {end}/{n_seqs} ({end/n_seqs*100:.1f}%)")
+    del model
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    return embeddings
+
+def _fuse_embeddings(embed_dict, strategy, target_dim=None):
+    parts = list(embed_dict.values())
+    names = list(embed_dict.keys())
+    if strategy == "concat":
+        fused = np.hstack(parts)
+        print(f"  融合策略=concat, 输出维度: {fused.shape[1]}")
+    elif strategy == "average":
+        max_dim = max(p.shape[1] for p in parts)
+        padded = []
+        for p in parts:
+            if p.shape[1] < max_dim:
+                pad = np.zeros((p.shape[0], max_dim - p.shape[1]), dtype=np.float32)
+                padded.append(np.hstack([p, pad]))
+            else:
+                padded.append(p)
+        fused = np.mean(np.stack(padded, axis=0), axis=0)
+        print(f"  融合策略=average, 输出维度: {fused.shape[1]}")
+    elif strategy == "pca_concat":
+        from sklearn.decomposition import PCA
+        reduced = []
+        for name, emb in embed_dict.items():
+            n_components = min(target_dim or 256, emb.shape[1], emb.shape[0])
+            pca = PCA(n_components=n_components, random_state=42)
+            reduced.append(pca.fit_transform(emb))
+            print(f"    PCA: {name} {emb.shape[1]}→{n_components} (explained_var={pca.explained_variance_ratio_.sum():.3f})")
+        fused = np.hstack(reduced)
+        print(f"  融合策略=pca_concat, 输出维度: {fused.shape[1]}")
+    else:
+        raise ValueError(f"未知融合策略: {strategy}")
+    return fused
+
+def stage_esm2_encode(output_dir, config):
+    import torch
+    out = Path(output_dir)
+    embed_path = out / "esm2_embeddings.npy"
+    model_names = config.get("esm2_models", [config.get("esm2_model", "esm2_t12_35M_UR50D")])
+    fusion_strategy = config.get("esm2_fusion", "concat")
+    if embed_path.exists():
+        embeddings = np.load(embed_path)
+        print(f"  ESM-2嵌入已存在: {embeddings.shape}")
+        return {"embed_shape": list(embeddings.shape), "models_used": model_names, "fusion": fusion_strategy}
+
+    feat_df = pd.read_csv(out / "feature_matrix.csv")
+    if config["device"] == "auto":
+        if torch.backends.mps.is_available(): device = torch.device("mps")
+        elif torch.cuda.is_available(): device = torch.device("cuda")
+        else: device = torch.device("cpu")
+    else:
+        device = torch.device(config["device"])
+    print(f"  设备: {device}")
+
+    sequences = feat_df['vh_sequence'].values
+    batch_size = config.get("esm2_batch_size", 4)
+    embed_dict = {}
+    for model_name in model_names:
+        print(f"  编码模型: {model_name}")
+        t0 = time.time()
+        emb = _encode_single_model(model_name, sequences, device, batch_size)
+        elapsed = time.time() - t0
+        print(f"    完成: shape={emb.shape}, 耗时={elapsed:.1f}s")
+        np.save(out / f"esm2_{model_name}.npy", emb)
+        embed_dict[model_name] = emb
+
+    if len(embed_dict) == 1:
+        embeddings = list(embed_dict.values())[0]
+    else:
+        pca_dim = config.get("esm2_pca_dim", 256)
+        embeddings = _fuse_embeddings(embed_dict, fusion_strategy, target_dim=pca_dim)
 
     np.save(embed_path, embeddings)
-    print(f"  ESM-2编码完成: {embeddings.shape}")
-    return {"embed_shape": list(embeddings.shape)}
+    print(f"  ESM-2编码完成: {embeddings.shape} (models={model_names}, fusion={fusion_strategy})")
+    return {"embed_shape": list(embeddings.shape), "models_used": model_names, "fusion": fusion_strategy}
 
 # ═══════════════════════════════════════════════════════════════
 # 阶段5: 反事实序列导航
@@ -1166,6 +1227,9 @@ if __name__ == "__main__":
     parser.add_argument("--device", "-d", default="auto", choices=["auto","cuda","mps","cpu"])
     parser.add_argument("--batch-size", "-b", type=int, default=4, help="ESM-2批大小")
     parser.add_argument("--top-n", "-n", type=int, default=2000, help="反事实编辑处理序列数")
+    parser.add_argument("--esm2-models", type=str, default=None, help="ESM-2模型列表(逗号分隔), 如 esm2_t12_35M_UR50D,esm2_t30_150M_UR50D")
+    parser.add_argument("--esm2-fusion", type=str, default="concat", choices=["concat","average","pca_concat"], help="多模型嵌入融合策略")
+    parser.add_argument("--esm2-pca-dim", type=int, default=256, help="PCA降维目标维度(pca_concat策略)")
     args = parser.parse_args()
 
     config = DEFAULT_CONFIG.copy()
@@ -1176,5 +1240,10 @@ if __name__ == "__main__":
     config["device"] = args.device
     config["esm2_batch_size"] = args.batch_size
     config["counterfactual_top_n"] = args.top_n
+    config["esm2_fusion"] = args.esm2_fusion
+    config["esm2_pca_dim"] = args.esm2_pca_dim
+    if args.esm2_models:
+        config["esm2_models"] = [m.strip() for m in args.esm2_models.split(",")]
+        config["esm2_model"] = config["esm2_models"][0]
 
     run_pipeline(config)
