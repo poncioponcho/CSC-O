@@ -907,13 +907,20 @@ def stage_layer3_counterfactual(output_dir, config):
     def double_ml_cate(X, T, Y, n_folds=5, method="causal_forest"):
         n = len(Y); cate = np.zeros(n); t_stats = np.zeros(n); se_arr = np.zeros(n)
         kf = KFold(n_splits=n_folds, shuffle=True, random_state=42)
+        T_arr = np.asarray(T).ravel()
+        is_discrete_t = len(np.unique(T_arr)) <= 10
         if method == "causal_forest":
             try:
                 from econml.dml import CausalForestDML
                 from sklearn.ensemble import GradientBoostingRegressor, GradientBoostingClassifier
+                if is_discrete_t:
+                    model_t = GradientBoostingClassifier(n_estimators=100, max_depth=3, learning_rate=0.05, random_state=42)
+                else:
+                    model_t = GradientBoostingRegressor(n_estimators=100, max_depth=3, learning_rate=0.05, random_state=42)
                 cf = CausalForestDML(
                     model_y=GradientBoostingRegressor(n_estimators=100, max_depth=3, learning_rate=0.05, random_state=42),
-                    model_t=GradientBoostingClassifier(n_estimators=100, max_depth=3, learning_rate=0.05, random_state=42),
+                    model_t=model_t,
+                    discrete_treatment=is_discrete_t,
                     n_estimators=1000, max_depth=5, min_samples_leaf=10,
                     random_state=42, cv=5, n_jobs=-1,
                 )
@@ -924,8 +931,8 @@ def stage_layer3_counterfactual(output_dir, config):
                 t_stats = cate / np.where(se_arr > 1e-8, se_arr, 1e-8)
                 print(f"    CausalForestDML: CATE range [{cate.min():.3f}, {cate.max():.3f}], mean={cate.mean():.3f}")
                 return cate, t_stats, se_arr
-            except ImportError:
-                print("    econml未安装, 降级到R-learner")
+            except (ImportError, Exception) as e:
+                print(f"    CausalForestDML失败: {e}, 降级到R-learner")
                 method = "r_learner"
         if method == "r_learner":
             for fold_i, (train_idx, test_idx) in enumerate(kf.split(X)):
@@ -942,7 +949,7 @@ def stage_layer3_counterfactual(output_dir, config):
                 from sklearn.ensemble import GradientBoostingRegressor as GBR
                 hetero_model = GBR(n_estimators=100, max_depth=3, learning_rate=0.05, random_state=42)
                 hetero_model.fit(X_te, cate_fold)
-                cate[test_idx] = hetero_model.predict(X)
+                cate[test_idx] = hetero_model.predict(X_te)
                 residuals = Y_resid - cate[test_idx] * T_resid
                 fold_se = np.sqrt(np.sum(residuals**2) / (n-1) / max(ss, 1e-8))
                 se_arr[test_idx] = fold_se

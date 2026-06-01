@@ -42,34 +42,28 @@ def train_scorer(training_csv, feature_matrix_csv):
     feat_df = pd.read_csv(feature_matrix_csv)
     train_df = pd.read_csv(training_csv)
 
-    feature_cols = [c for c in feat_df.columns if c not in [
-        'global_sequence_index', 'run', 'run_index', 'target_id', 'gene_symbol',
-        'design_id', 'backbone_id', 'sequence_variant_id', 'vh_sequence', 'vl_sequence',
-        'full_sequence', 'cdr1_sequence', 'cdr2_sequence', 'cdr3_sequence',
-        'framework_type', 'hotspot_indices', 'hotspots', 'hotspot_strategy',
-        'hotspot_policy_type', 'hotspot_policy_name', 'hotspot_policy_description',
-        'hotspot_index', 'hotspot_run_hotspots', 'hotspot_role', 'hotspot_confidence',
-        'designed_hotspots', 'contacted_hotspots',
-        'rf2_filter_reason', 'af3_filter_reason', 'schrodinger_filter_reason',
-        'funnel_stage', 'antibody_pdb_path', 'complex_pdb_path',
-        'schrodinger_top_pose_pdb', 'metrics_path',
-    ] and feat_df[c].dtype in ['int64', 'float64', 'bool']]
+    cdr3_feature_cols = [
+        'cdr3_len', 'aromatic_ratio', 'glycine_ratio', 'serine_ratio',
+        'proline_count', 'positive_count', 'hydrophobic_ratio',
+        'first_is_aromatic', 'last_is_YH', 'has_ggg', 'has_sss', 'has_ll',
+    ]
+    available_cols = [c for c in cdr3_feature_cols if c in feat_df.columns]
 
-    X = feat_df[feature_cols].fillna(0).values
+    X = feat_df[available_cols].fillna(0).values
     y = feat_df['rf2_passed'].astype(int).values
 
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
     clf = GradientBoostingClassifier(
-        n_estimators=200, max_depth=5, learning_rate=0.05,
-        min_samples_leaf=10, random_state=42,
+        n_estimators=200, max_depth=3, learning_rate=0.05,
+        min_samples_leaf=20, random_state=42,
     )
     cv_scores = cross_val_score(clf, X_scaled, y, cv=5, scoring='roc_auc')
     print(f"  训练集 AUC: {cv_scores.mean():.3f} ± {cv_scores.std():.3f}")
 
     clf.fit(X_scaled, y)
-    return clf, scaler, feature_cols
+    return clf, scaler, available_cols
 
 def score_sequences(generated_csv, clf, scaler, feature_cols):
     gen_df = pd.read_csv(generated_csv)
