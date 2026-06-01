@@ -942,14 +942,19 @@ def stage_layer3_counterfactual(output_dir, config):
                 m_y = lgb.LGBMRegressor(n_estimators=200, max_depth=5, learning_rate=0.05, verbose=-1, random_state=42)
                 m_y.fit(X_tr, Y_tr); Y_resid = Y_te - m_y.predict(X_te)
                 m_t = lgb.LGBMClassifier(n_estimators=200, max_depth=5, learning_rate=0.05, verbose=-1, random_state=42)
-                m_t.fit(X_tr, T_tr); T_resid = T_te - m_t.predict_proba(X_te)[:, 1]
+                m_t.fit(X_tr, T_tr)
+                ps = m_t.predict_proba(X_te)[:, 1]
+                ps = np.clip(ps, 0.1, 0.9)
+                T_resid = T_te - ps
                 ss = np.sum(T_resid**2)
                 if ss < 1e-8: continue
                 cate_fold = Y_resid * T_resid / (T_resid**2 + 1e-6)
+                cate_fold = np.clip(cate_fold, -50, 50)
                 from sklearn.ensemble import GradientBoostingRegressor as GBR
                 hetero_model = GBR(n_estimators=100, max_depth=3, learning_rate=0.05, random_state=42)
                 hetero_model.fit(X_te, cate_fold)
                 cate[test_idx] = hetero_model.predict(X_te)
+                cate[test_idx] = np.clip(cate[test_idx], -50, 50)
                 residuals = Y_resid - cate[test_idx] * T_resid
                 fold_se = np.sqrt(np.sum(residuals**2) / (n-1) / max(ss, 1e-8))
                 se_arr[test_idx] = fold_se
