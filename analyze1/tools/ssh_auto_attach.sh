@@ -34,7 +34,7 @@ ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -t "${SERVER_USER}@${SERV
         echo "--- 管线进度 ---"
         python3 -c "
 import json
-with open('/home/test/CSC-O/work/pipeline_state.json') as f:
+with open(os.path.expanduser('~/CSC-O/work/pipeline_state.json')) as f:
     s = json.load(f)
 print('已完成阶段:', [x['name'] for x in s.get('completed_stages', [])])
 print('当前阶段:', s.get('current_stage', '无'))

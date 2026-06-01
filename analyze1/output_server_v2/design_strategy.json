@@ -1,0 +1,185 @@
+{
+  "strategy_name": "CSC-O_v1",
+  "description": "Causal-Stratified Counterfactual Optimization for Antibody CDR3 Design",
+  "version": "1.0",
+  "date": "2026-06-01",
+  "data_source": "data/Q02223_first50_all_sequences.csv",
+  "data_size": 10572,
+  "hard_constraints": {
+    "cdr3_length_allowed": [
+      5,
+      6,
+      7
+    ],
+    "cdr3_length_preferred": [
+      6,
+      7
+    ],
+    "cdr3_first_residue_whitelist": [
+      "F",
+      "V",
+      "W",
+      "Y"
+    ],
+    "cdr3_last_residue_whitelist": [
+      "A",
+      "S",
+      "V",
+      "Y"
+    ],
+    "cdr3_min_positive_count": 0,
+    "cdr3_min_aromatic_first": true
+  },
+  "soft_preferences": {
+    "aromatic_min_ratio": 0.2,
+    "glycine_max_ratio": 0.2,
+    "serine_max_ratio": 0.15,
+    "proline_max_count": 1
+  },
+  "anti_patterns": [
+    "GGG",
+    "SSS",
+    "LL"
+  ],
+  "success_templates": {
+    "length_5": [
+      "NALQY",
+      "DPGQY",
+      "NPGEA",
+      "NYGEY",
+      "NPGEY",
+      "DPGTA",
+      "EPGQY",
+      "EPGTA",
+      "DDLKY",
+      "DAGKY"
+    ],
+    "length_6": [
+      "GPNLEY",
+      "GEHLEY",
+      "WTSAEY",
+      "YKDALY",
+      "WGPAEY",
+      "YGSSEY",
+      "WTSSEY",
+      "GDHLEY",
+      "WTDAEY",
+      "GDNLEY"
+    ],
+    "length_7": [
+      "YYNGQTY",
+      "YYNGKTY",
+      "YKDGQTY",
+      "YYNGQLY",
+      "YHNGQTY",
+      "YYNGKLY",
+      "YKDGKTY",
+      "YKDGQLY",
+      "YKDGKLY",
+      "YKDGVTY"
+    ]
+  },
+  "salvage_edits": [
+    {
+      "pattern": "Pos9 Y->E",
+      "count": 314,
+      "mean_pae_change": -1.7
+    },
+    {
+      "pattern": "Pos6 S->R",
+      "count": 234,
+      "mean_pae_change": -1.16
+    },
+    {
+      "pattern": "Pos6 P->R",
+      "count": 186,
+      "mean_pae_change": -1.16
+    },
+    {
+      "pattern": "Pos6 T->R",
+      "count": 168,
+      "mean_pae_change": -1.16
+    },
+    {
+      "pattern": "Pos6 F->R",
+      "count": 162,
+      "mean_pae_change": -1.16
+    },
+    {
+      "pattern": "Pos6 E->R",
+      "count": 144,
+      "mean_pae_change": -1.16
+    },
+    {
+      "pattern": "Pos6 Q->R",
+      "count": 139,
+      "mean_pae_change": -1.16
+    },
+    {
+      "pattern": "Pos9 Q->E",
+      "count": 139,
+      "mean_pae_change": -1.7
+    },
+    {
+      "pattern": "Pos6 Y->R",
+      "count": 111,
+      "mean_pae_change": -1.16
+    },
+    {
+      "pattern": "Pos9 F->E",
+      "count": 95,
+      "mean_pae_change": -1.7
+    },
+    {
+      "pattern": "Pos6 N->R",
+      "count": 85,
+      "mean_pae_change": -1.16
+    },
+    {
+      "pattern": "Pos6 A->R",
+      "count": 82,
+      "mean_pae_change": -1.16
+    },
+    {
+      "pattern": "Pos9 S->E",
+      "count": 79,
+      "mean_pae_change": -1.7
+    },
+    {
+      "pattern": "Pos9 D->E",
+      "count": 77,
+      "mean_pae_change": -1.7
+    },
+    {
+      "pattern": "Pos6 D->R",
+      "count": 76,
+      "mean_pae_change": -1.16
+    },
+    {
+      "pattern": "Pos9 T->E",
+      "count": 54,
+      "mean_pae_change": -1.7
+    }
+  ],
+  "truncation_rule": {
+    "if_cdr3_length_ge_10": "truncate_to_7",
+    "evidence_count": 960
+  },
+  "cox_hazard_ratios": {
+    "glycine_ratio": 4.35,
+    "serine_ratio": 1.77,
+    "hydrophobic_ratio": 1.18,
+    "cdr3_len": 1.08,
+    "positive_ratio": 0.95,
+    "aromatic_ratio": 0.67
+  },
+  "ate_estimates": {
+    "cdr3_len": 0.91,
+    "aromatic_ratio": -1.02,
+    "glycine_ratio": -0.94,
+    "serine_ratio": 9.69,
+    "proline_count": 1.35,
+    "first_is_aromatic": -6.54,
+    "last_is_YH": 2.88
+  }
+}

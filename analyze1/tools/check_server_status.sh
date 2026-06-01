@@ -29,7 +29,7 @@ ssh -o ConnectTimeout=10 "${SERVER_USER}@${SERVER_IP}" bash -s << 'EOF'
     if [ -f ~/CSC-O/work/pipeline_state.json ]; then
         python3 -c "
 import json
-with open('/home/test/CSC-O/work/pipeline_state.json') as f:
+with open(os.path.expanduser('~/CSC-O/work/pipeline_state.json')) as f:
     s = json.load(f)
 completed = [x['name'] for x in s.get('completed_stages', [])]
 current = s.get('current_stage', '无')

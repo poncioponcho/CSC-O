@@ -30,8 +30,7 @@ work/
 .idea/
 
 # 排除敏感文档
-开源的靶点数据源.docx
-药物研发中的因果推断.docx
+*.docx
 
 # 排除含硬编码凭据的脚本
 run_csc_o_remote.sh
@@ -44,3 +43,9 @@ run_csc_o_remote.sh
 venv/
 .env.local
 .env.*.local
+
+# 排除服务器输出大文件（保留报告）
+**/output_server/*.png
+**/output_server/*.csv
+**/output_server_v2/*.png
+**/output_server_v2/*.csv
