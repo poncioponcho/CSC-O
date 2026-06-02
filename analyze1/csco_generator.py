@@ -6,48 +6,23 @@ import numpy as np
 from pathlib import Path
 from collections import Counter
 
-AMINO_ACIDS = list("ACDEFGHIKLMNPQRSTVWY")
+from csco_config import AMINO_ACIDS, AROMATIC, POSITIVE, HYDROPHOBIC, extract_cdr3_features
 
-AROMATIC = set("FWY")
-HYDROPHOBIC = set("AILMFWV")
-POSITIVE = set("KRH")
-NEGATIVE = set("DE")
-POLAR = set("STNQ")
 
 def load_strategy(strategy_path):
     with open(strategy_path) as f:
         return json.load(f)
 
-def compute_cdr3_features(cdr3):
-    n = len(cdr3)
-    if n == 0:
-        return {}
-    aromatic_count = sum(1 for a in cdr3 if a in AROMATIC)
-    glycine_count = sum(1 for a in cdr3 if a == 'G')
-    serine_count = sum(1 for a in cdr3 if a == 'S')
-    proline_count = sum(1 for a in cdr3 if a == 'P')
-    positive_count = sum(1 for a in cdr3 if a in POSITIVE)
-    return {
-        'cdr3_len': n,
-        'aromatic_ratio': aromatic_count / n,
-        'glycine_ratio': glycine_count / n,
-        'serine_ratio': serine_count / n,
-        'proline_count': proline_count,
-        'positive_count': positive_count,
-        'first_is_aromatic': cdr3[0] in AROMATIC,
-        'last_is_YH': cdr3[-1] in ('Y', 'H'),
-        'has_ggg': 'GGG' in cdr3,
-        'has_sss': 'SSS' in cdr3,
-        'has_ll': 'LL' in cdr3,
-    }
 
-def check_hard_constraints(cdr3, strategy):
+def check_hard_constraints(cdr3, strategy, length_specific_prefs=None):
     hc = strategy['hard_constraints']
-    features = compute_cdr3_features(cdr3)
+    features = extract_cdr3_features(cdr3)
     if features['cdr3_len'] not in hc.get('cdr3_length_allowed', [5, 6, 7]):
         return False, "length_not_allowed"
-    if hc.get('cdr3_min_aromatic_first') and not features['first_is_aromatic']:
-        return False, "first_not_aromatic"
+    lsp = length_specific_prefs or strategy.get('length_specific_preferences', {}).get(str(features['cdr3_len']), {})
+    if hc.get('cdr3_min_aromatic_first') and not lsp.get('first_aromatic_optional'):
+        if not features['first_is_aromatic']:
+            return False, "first_not_aromatic"
     if hc.get('cdr3_first_residue_whitelist') and cdr3[0] not in hc['cdr3_first_residue_whitelist']:
         return False, "first_not_whitelisted"
     if hc.get('cdr3_last_residue_whitelist') and cdr3[-1] not in hc['cdr3_last_residue_whitelist']:
@@ -56,29 +31,41 @@ def check_hard_constraints(cdr3, strategy):
         return False, "insufficient_positive"
     return True, None
 
+
 def check_anti_patterns(cdr3, strategy):
     for pattern in strategy.get('anti_patterns', []):
         if pattern in cdr3:
             return True, pattern
     return False, None
 
+
 def score_soft_preferences(cdr3, strategy):
     sp = strategy.get('soft_preferences', {})
-    features = compute_cdr3_features(cdr3)
+    lsp_all = strategy.get('length_specific_preferences', {})
+    features = extract_cdr3_features(cdr3)
+    len_key = str(features['cdr3_len'])
+    effective_sp = {**sp, **lsp_all.get(len_key, {})}
     score = 0.0
-    if 'aromatic_min_ratio' in sp and features['aromatic_ratio'] >= sp['aromatic_min_ratio']:
+    if 'aromatic_min_ratio' in effective_sp and features['aromatic_ratio'] >= effective_sp['aromatic_min_ratio']:
         score += 1.0
-    if 'glycine_max_ratio' in sp and features['glycine_ratio'] <= sp['glycine_max_ratio']:
+    if 'glycine_max_ratio' in effective_sp and features['glycine_ratio'] <= effective_sp['glycine_max_ratio']:
         score += 1.0
-    if 'serine_max_ratio' in sp and features['serine_ratio'] <= sp['serine_max_ratio']:
+    if 'serine_max_ratio' in effective_sp and features['serine_ratio'] <= effective_sp.get('serine_max_ratio', 0.15):
         score += 1.0
-    if 'proline_max_count' in sp and features['proline_count'] <= sp['proline_max_count']:
+    if 'proline_max_count' in effective_sp and features['proline_count'] <= effective_sp.get('proline_max_count', 1):
         score += 0.5
+    if 'hydrophobic_min_ratio' in effective_sp and features['hydrophobic_ratio'] >= effective_sp['hydrophobic_min_ratio']:
+        score += 1.0
     return score
+
 
 def generate_cdr3(strategy, length, n_samples, rng):
     hc = strategy['hard_constraints']
     sp = strategy.get('soft_preferences', {})
+    lsp = strategy.get('length_specific_preferences', {})
+    len_prefs = lsp.get(str(length), {})
+    effective_sp = {**sp, **len_prefs}
+
     first_whitelist = hc.get('cdr3_first_residue_whitelist', AMINO_ACIDS)
     last_whitelist = hc.get('cdr3_last_residue_whitelist', AMINO_ACIDS)
     preferred_lengths = hc.get('cdr3_length_preferred', [length])
@@ -104,18 +91,22 @@ def generate_cdr3(strategy, length, n_samples, rng):
             if middle_len > 0:
                 middle = []
                 for _ in range(middle_len):
-                    if sp.get('aromatic_min_ratio', 0) > 0 and rng.random() < sp['aromatic_min_ratio']:
+                    if effective_sp.get('aromatic_min_ratio', 0) > 0 and rng.random() < effective_sp['aromatic_min_ratio']:
                         middle.append(rng.choice(list(AROMATIC)))
                     else:
                         weights = []
                         for aa in AMINO_ACIDS:
                             w = 1.0
-                            if aa == 'G' and 'glycine_max_ratio' in sp:
-                                w *= max(0.1, 1.0 - sp['glycine_max_ratio'])
-                            if aa == 'S' and 'serine_max_ratio' in sp:
-                                w *= max(0.1, 1.0 - sp['serine_max_ratio'])
+                            if aa == 'G' and 'glycine_max_ratio' in effective_sp:
+                                w *= max(0.1, 1.0 - effective_sp['glycine_max_ratio'])
+                            if aa == 'S' and 'serine_max_ratio' in effective_sp:
+                                w *= max(0.1, 1.0 - effective_sp['serine_max_ratio'])
                             if aa == 'P':
-                                w *= 0.3
+                                pro_max = effective_sp.get('proline_max_count', 1)
+                                w *= 0.3 if pro_max <= 1 else 0.6
+                            if aa in HYDROPHOBIC and 'hydrophobic_min_ratio' in effective_sp:
+                                hyd_target = effective_sp['hydrophobic_min_ratio']
+                                w *= (1.0 + hyd_target)
                             weights.append(w)
                         total = sum(weights)
                         weights = [w/total for w in weights]
@@ -136,7 +127,7 @@ def generate_cdr3(strategy, length, n_samples, rng):
             continue
 
         soft_score = score_soft_preferences(cdr3, strategy)
-        features = compute_cdr3_features(cdr3)
+        features = extract_cdr3_features(cdr3)
         generated.append({
             'cdr3': cdr3,
             'soft_score': soft_score,
@@ -145,10 +136,12 @@ def generate_cdr3(strategy, length, n_samples, rng):
 
     return generated
 
+
 def generate_vh_framework(cdr3, framework_templates, rng):
     if not framework_templates:
         return f"EVQLVESGGGLVQPGGSLRLSCAASGFTFSSYAMSWVRQAPGKGLEWVSAISGSGGSTYYADSVKGRFTISRDNSKNTLYLQMNSLRAEDTAVYYCAR{cdr3}WGQGTLVTVSS"
     return rng.choice(framework_templates).replace('{CDR3}', cdr3)
+
 
 def main():
     parser = argparse.ArgumentParser(description="CSC-O Constrained Sequence Generator")
@@ -166,6 +159,7 @@ def main():
     hc = strategy['hard_constraints']
     allowed_lengths = hc.get('cdr3_length_allowed', [5, 6, 7])
     preferred_lengths = hc.get('cdr3_length_preferred', [6, 7])
+    length_weights_raw = strategy.get('length_generation_weights', {})
 
     print(f"CSC-O 序列生成器")
     print(f"  策略: {strategy.get('strategy_name', 'CSC-O_v1')}")
@@ -173,12 +167,24 @@ def main():
     print(f"  目标生成数: {args.n_samples}")
 
     all_generated = []
-    n_per_length = args.n_samples // len(allowed_lengths)
-    for length in allowed_lengths:
-        n_target = n_per_length * 2 if length in preferred_lengths else n_per_length
-        seqs = generate_cdr3(strategy, length, n_target, rng)
-        all_generated.extend(seqs)
-        print(f"  长度 {length}: 生成 {len(seqs)} 条 (目标 {n_target})")
+    if length_weights_raw:
+        weight_sum = sum(length_weights_raw.get(str(l), 0.0) for l in allowed_lengths)
+        if weight_sum > 0:
+            for length in allowed_lengths:
+                w = length_weights_raw.get(str(length), 0.0)
+                n_target = max(int(args.n_samples * w / weight_sum), 100)
+                seqs = generate_cdr3(strategy, length, n_target, rng)
+                all_generated.extend(seqs)
+                print(f"  长度 {length}: 生成 {len(seqs)} 条 (权重={w:.3f}, 目标 {n_target})")
+        else:
+            length_weights_raw = {}
+    if not length_weights_raw:
+        n_per_length = args.n_samples // len(allowed_lengths)
+        for length in allowed_lengths:
+            n_target = n_per_length * 2 if length in preferred_lengths else n_per_length
+            seqs = generate_cdr3(strategy, length, n_target, rng)
+            all_generated.extend(seqs)
+            print(f"  长度 {length}: 生成 {len(seqs)} 条 (目标 {n_target})")
 
     if args.min_soft_score > 0:
         before = len(all_generated)
@@ -212,6 +218,7 @@ def main():
     print(f"  输出: {out_path} ({len(df)} 条)")
     print(f"  CDR3长度分布: {dict(Counter(df['cdr3_len']))}")
     print(f"  平均软偏好得分: {df['soft_score'].mean():.2f}")
+
 
 if __name__ == "__main__":
     main()

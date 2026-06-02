@@ -31,6 +31,13 @@ work/
 服务器*配置*.md
 *配置记录*.md
 *.docx
+output_server*/
+output_v*/
+
+# Data files (too large for git)
+*.csv
+*.xlsx
+*.xls
 
 # Logs
 *.log

@@ -9,60 +9,11 @@ OUTPUT_DIR = './output'
 import os
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-AMINO_ACIDS = list('ACDEFGHIKLMNPQRSTVWY')
-AROMATIC = set('YWF')
-POSITIVE = set('KRH')
-NEGATIVE = set('DE')
-HYDROPHOBIC = set('AVILMFWP')
-GLYCINE = set('G')
-SERINE = set('S')
-PROLINE = set('P')
+from csco_config import AMINO_ACIDS, AROMATIC, POSITIVE, NEGATIVE, HYDROPHOBIC, GLYCINE, SERINE, PROLINE, extract_cdr3_features
 
 def load_data():
     df = pd.read_csv(DATA_PATH)
     return df
-
-def extract_cdr3_features(cdr3_seq):
-    if pd.isna(cdr3_seq) or len(cdr3_seq) == 0:
-        return {
-            'cdr3_len': 0, 'positive_count': 0, 'positive_ratio': 0.0,
-            'aromatic_count': 0, 'aromatic_ratio': 0.0,
-            'glycine_count': 0, 'glycine_ratio': 0.0,
-            'serine_count': 0, 'serine_ratio': 0.0,
-            'proline_count': 0, 'proline_ratio': 0.0,
-            'hydrophobic_ratio': 0.0, 'negative_ratio': 0.0,
-            'first_residue': 'X', 'last_residue': 'X',
-            'has_ggg': False, 'has_sss': False, 'has_ll': False,
-        }
-    n = len(cdr3_seq)
-    pos_count = sum(1 for a in cdr3_seq if a in POSITIVE)
-    aro_count = sum(1 for a in cdr3_seq if a in AROMATIC)
-    gly_count = sum(1 for a in cdr3_seq if a in GLYCINE)
-    ser_count = sum(1 for a in cdr3_seq if a in SERINE)
-    pro_count = sum(1 for a in cdr3_seq if a in PROLINE)
-    hydro_count = sum(1 for a in cdr3_seq if a in HYDROPHOBIC)
-    neg_count = sum(1 for a in cdr3_seq if a in NEGATIVE)
-
-    return {
-        'cdr3_len': n,
-        'positive_count': pos_count,
-        'positive_ratio': pos_count / n,
-        'aromatic_count': aro_count,
-        'aromatic_ratio': aro_count / n,
-        'glycine_count': gly_count,
-        'glycine_ratio': gly_count / n,
-        'serine_count': ser_count,
-        'serine_ratio': ser_count / n,
-        'proline_count': pro_count,
-        'proline_ratio': pro_count / n,
-        'hydrophobic_ratio': hydro_count / n,
-        'negative_ratio': neg_count / n,
-        'first_residue': cdr3_seq[0],
-        'last_residue': cdr3_seq[-1],
-        'has_ggg': 'GGG' in cdr3_seq,
-        'has_sss': 'SSS' in cdr3_seq.upper(),
-        'has_ll': 'LL' in cdr3_seq,
-    }
 
 def build_feature_matrix(df):
     features_list = []

@@ -108,7 +108,7 @@ python3 workspace_restore.py
 
 ```bash
 export VPNWD_SERVER_IP="REDACTED_IP"
-export VPNWD_SERVER_USER="test"
+export VPNWD_SERVER_USER="REDACTED_USER"
 export VPNWD_SESSION="csco"
 export VPNWD_INTERVAL="5"
 ```

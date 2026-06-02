@@ -75,7 +75,7 @@ Layer 5: 规则合成 (Synthesis)
 
 | 组件 | 配置 |
 |------|------|
-| 服务器 | Sugon-W780-G20 |
+| 服务器 | REDACTED_HOSTNAME |
 | GPU | 8 × NVIDIA GeForce GTX 1080 Ti (11GB × 8 = 88GB) |
 | CPU | 未知型号，多核 |
 | 内存 | 125GB |
@@ -559,7 +559,7 @@ ELSE:
 - 提供可量化的预测改进（3.6× 通过率提升）
 
 **代码交接**：
-- 所有修改提交到 GitHub：`https://github.com/poncioponcho/CSC-O.git`
+- 所有修改提交到 GitHub：`https://github.com/REDACTED_USER/CSC-O.git`
 - 关键分支：main
 - 未跟踪文件：服务器配置（`.gitignore` 已排除敏感信息）
 

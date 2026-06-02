@@ -3,7 +3,7 @@
 # 用法: ./ssh_auto_attach.sh [session_name]
 
 SERVER_IP="${SERVER_IP:-REDACTED_IP}"
-SERVER_USER="${SERVER_USER:-test}"
+SERVER_USER="${SERVER_USER:-REDACTED_USER}"
 TMUX_SESSION="${1:-csco}"
 
 echo "========================================"

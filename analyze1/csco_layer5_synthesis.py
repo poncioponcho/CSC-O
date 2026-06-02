@@ -36,8 +36,8 @@ last_res_pass = feat_df.groupby('last_residue').agg(
     rf2_pass=('rf2_passed', 'sum'),
 ).reset_index()
 last_res_pass['rate'] = last_res_pass['rf2_pass'] / last_res_pass['total']
-last_whitelist = last_res_pass[last_res_pass['rate'] > 0.10]['last_residue'].tolist()
-print(f'CDR3尾残基白名单（通过率>10%）: {last_whitelist}')
+last_whitelist = last_res_pass[last_res_pass['rate'] > 0.15]['last_residue'].tolist()
+print(f'CDR3尾残基白名单（通过率>15%）: {last_whitelist}')
 
 print('\n--- 5.2 软偏好规则 ---')
 

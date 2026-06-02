@@ -3,8 +3,8 @@
 # 用法: ./vpn_diagnose.sh <目标服务器IP> [VPN接口名, 默认自动检测]
 #
 # 示例:
-#   ./vpn_diagnose.sh 10.105.212.210
-#   ./vpn_diagnose.sh 10.105.212.210 utun4
+#   ./vpn_diagnose.sh REDACTED_IP
+#   ./vpn_diagnose.sh REDACTED_IP utun4
 
 set -e
 

@@ -13,18 +13,14 @@ import lightgbm as lgb
 import warnings
 warnings.filterwarnings('ignore')
 import os
-import sys
 
-sys.path.insert(0, '.')
-from csco_data_engineering import extract_cdr3_features
+from csco_config import AMINO_ACIDS, extract_cdr3_features
 
 OUTPUT_DIR = './output'
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'SimHei', 'DejaVu Sans']
 plt.rcParams['axes.unicode_minus'] = False
-
-AMINO_ACIDS = list('ACDEFGHIKLMNPQRSTVWY')
 
 feat_df = pd.read_csv(os.path.join(OUTPUT_DIR, 'feature_matrix.csv'))
 embeddings = np.load(os.path.join(OUTPUT_DIR, 'esm2_embeddings.npy'))

@@ -3,7 +3,7 @@
 # 用法: ./check_server_status.sh
 
 SERVER_IP="${SERVER_IP:-REDACTED_IP}"
-SERVER_USER="${SERVER_USER:-test}"
+SERVER_USER="${SERVER_USER:-REDACTED_USER}"
 
 echo "========================================"
 echo "服务器运行状态查询"

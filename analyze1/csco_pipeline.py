@@ -2,6 +2,13 @@
 """
 CSC-O Pipeline — Causal-Stratified Counterfactual Optimization
 统一入口：自动检测输入格式、补全缺失列、顺序执行全部6个阶段
+
+重构版本 (rf3-v2):
+- 优化目标从 rf2_passed 切换为 final_candidate（可配置）
+- 统一使用 csco_config 公共模块，消除代码克隆
+- 修复因果推断 Treatment=Outcome Bug
+- 增强 R-learner 数值稳定性
+- 模块化拆分，提升可维护性
 """
 
 import os
@@ -22,163 +29,13 @@ import seaborn as sns
 import warnings
 warnings.filterwarnings('ignore')
 
-# ═══════════════════════════════════════════════════════════════
-# 配置
-# ═══════════════════════════════════════════════════════════════
-
-DEFAULT_CONFIG = {
-    "input_file": None,
-    "output_dir": "./output",
-    "work_dir": "./work",
-    "stage_resume": True,
-    "esm2_model": "esm2_t12_35M_UR50D",
-    "esm2_models": ["esm2_t12_35M_UR50D"],
-    "esm2_fusion": "concat",
-    "esm2_pca_dim": 256,
-    "esm2_batch_size": 4,
-    "cate_method": "causal_forest",
-    "subgroup_n_clusters": 3,
-    "device": "auto",
-    "max_cdr3_len": 13,
-    "truncation_target": 7,
-    "counterfactual_top_n": 2000,
-    "tsne_sample_size": 3000,
-}
-
-ESM2_MODEL_REGISTRY = {
-    "esm2_t12_35M_UR50D":  {"layers": 12, "dim": 480},
-    "esm2_t30_150M_UR50D": {"layers": 30, "dim": 640},
-    "esm2_t33_650M_UR50D": {"layers": 33, "dim": 1280},
-    "esm2_t36_3B_UR50D":   {"layers": 36, "dim": 2560},
-}
-
-STAGE_NAMES = [
-    "data_engineering",
-    "layer1_stratified",
-    "layer2_causal",
-    "layer3_esm2_encode",
-    "layer3_counterfactual",
-    "layer5_synthesis",
-]
-
-AMINO_ACIDS = list('ACDEFGHIKLMNPQRSTVWY')
-AROMATIC = set('YWF')
-POSITIVE = set('KRH')
-NEGATIVE = set('DE')
-HYDROPHOBIC = set('AVILMFWP')
-GLYCINE = set('G')
-SERINE = set('S')
-PROLINE = set('P')
-
-# ═══════════════════════════════════════════════════════════════
-# 完整列模式：81列 + 默认值
-# ═══════════════════════════════════════════════════════════════
-
-COLUMN_SCHEMA = {
-    'global_sequence_index':        {'dtype': int,    'default': 0},
-    'run':                          {'dtype': str,    'default': ''},
-    'run_index':                    {'dtype': int,    'default': 0},
-    'target_id':                    {'dtype': str,    'default': ''},
-    'gene_symbol':                  {'dtype': str,    'default': ''},
-    'design_id':                    {'dtype': str,    'default': ''},
-    'backbone_id':                  {'dtype': int,    'default': 0},
-    'sequence_variant_id':          {'dtype': int,    'default': 0},
-    'vh_sequence':                  {'dtype': str,    'default': ''},
-    'vl_sequence':                  {'dtype': str,    'default': ''},
-    'full_sequence':                {'dtype': str,    'default': ''},
-    'sequence_length':              {'dtype': int,    'default': 0},
-    'cdr1_sequence':                {'dtype': str,    'default': ''},
-    'cdr2_sequence':                {'dtype': str,    'default': ''},
-    'cdr3_sequence':                {'dtype': str,    'default': ''},
-    'framework_type':               {'dtype': str,    'default': ''},
-    'hotspot_indices':              {'dtype': str,    'default': ''},
-    'hotspots':                     {'dtype': str,    'default': ''},
-    'hotspot_strategy':             {'dtype': str,    'default': ''},
-    'hotspot_policy_mode':          {'dtype': str,    'default': ''},
-    'hotspot_policy_default_role':  {'dtype': str,    'default': ''},
-    'hotspot_policy_contact_cutoff': {'dtype': float, 'default': np.nan},
-    'hotspot_policy_min_contacts':  {'dtype': float,  'default': np.nan},
-    'hotspot_policy_min_coverage':  {'dtype': float,  'default': np.nan},
-    'hotspot_index':                {'dtype': float,  'default': np.nan},
-    'hotspot_run_hotspots':         {'dtype': str,    'default': ''},
-    'hotspot_role':                 {'dtype': str,    'default': ''},
-    'hotspot_confidence':           {'dtype': float,  'default': np.nan},
-    'designed_hotspots':            {'dtype': str,    'default': ''},
-    'contacted_hotspots':           {'dtype': str,    'default': ''},
-    'rf2_pred_lddt':                {'dtype': float,  'default': np.nan},
-    'rf2_pae':                      {'dtype': float,  'default': np.nan},
-    'rf2_interaction_pae':          {'dtype': float,  'default': np.nan},
-    'rf2_target_aligned_antibody_rmsd': {'dtype': float, 'default': np.nan},
-    'rf2_target_aligned_cdr_rmsd': {'dtype': float,  'default': np.nan},
-    'rf2_framework_aligned_antibody_rmsd': {'dtype': float, 'default': np.nan},
-    'rf2_framework_aligned_cdr_rmsd': {'dtype': float, 'default': np.nan},
-    'rf2_framework_aligned_H1_rmsd': {'dtype': float, 'default': np.nan},
-    'rf2_framework_aligned_H2_rmsd': {'dtype': float, 'default': np.nan},
-    'rf2_framework_aligned_H3_rmsd': {'dtype': float, 'default': np.nan},
-    'rf2_framework_aligned_L1_rmsd': {'dtype': float, 'default': np.nan},
-    'rf2_framework_aligned_L2_rmsd': {'dtype': float, 'default': np.nan},
-    'rf2_framework_aligned_L3_rmsd': {'dtype': float, 'default': np.nan},
-    'rf2_passed_filter':            {'dtype': bool,   'default': False},
-    'rf2_filter_reason':            {'dtype': str,    'default': ''},
-    'af3_analyzed':                 {'dtype': bool,   'default': False},
-    'af3_plddt':                    {'dtype': float,  'default': np.nan},
-    'af3_ptm':                      {'dtype': float,  'default': np.nan},
-    'af3_iptm':                     {'dtype': float,  'default': np.nan},
-    'af3_ranking_confidence':       {'dtype': float,  'default': np.nan},
-    'af3_ranking_score':            {'dtype': float,  'default': np.nan},
-    'af3_antibody_antigen_iptm':    {'dtype': float,  'default': np.nan},
-    'af3_antibody_antigen_pae_min': {'dtype': float,  'default': np.nan},
-    'af3_pae_interface_mean':       {'dtype': float,  'default': np.nan},
-    'af3_passed_filter':            {'dtype': bool,   'default': False},
-    'af3_filter_reason':            {'dtype': str,    'default': ''},
-    'af_seed':                      {'dtype': float,  'default': np.nan},
-    'schrodinger_analyzed':         {'dtype': bool,   'default': False},
-    'schrodinger_passed_filter':    {'dtype': bool,   'default': False},
-    'schrodinger_filter_reason':    {'dtype': str,    'default': ''},
-    'docking_score':                {'dtype': float,  'default': np.nan},
-    'mmgbsa_delta_g':               {'dtype': float,  'default': np.nan},
-    'interface_area':               {'dtype': float,  'default': np.nan},
-    'n_hydrogen_bonds':             {'dtype': float,  'default': np.nan},
-    'n_salt_bridges':               {'dtype': float,  'default': np.nan},
-    'n_hydrophobic_contacts':       {'dtype': float,  'default': np.nan},
-    'n_clashes':                    {'dtype': float,  'default': np.nan},
-    'hotspot_coverage':             {'dtype': float,  'default': np.nan},
-    'cdr_contact_count':            {'dtype': float,  'default': np.nan},
-    'pose_rmsd_to_alphafold':       {'dtype': float,  'default': np.nan},
-    'desmond_rmsd':                 {'dtype': float,  'default': np.nan},
-    'desmond_rmsf_mean':            {'dtype': float,  'default': np.nan},
-    'desmond_interface_hbond_retention': {'dtype': float, 'default': np.nan},
-    'desmond_hotspot_contact_retention': {'dtype': float, 'default': np.nan},
-    'desmond_complex_dissociated':  {'dtype': object, 'default': np.nan},
-    'funnel_stage':                 {'dtype': str,    'default': ''},
-    'final_candidate':              {'dtype': bool,   'default': False},
-    'antibody_pdb_path':            {'dtype': str,    'default': ''},
-    'complex_pdb_path':             {'dtype': str,    'default': ''},
-    'schrodinger_top_pose_pdb':     {'dtype': str,    'default': ''},
-    'metrics_path':                 {'dtype': str,    'default': ''},
-}
-
-COLUMN_ALIASES = {
-    'vh_sequence':  ['vh_sequence', 'vh_seq', 'heavy_chain', 'vh'],
-    'full_sequence': ['full_sequence', 'sequence', 'seq', 'protein_sequence'],
-    'cdr3_sequence': ['cdr3_sequence', 'cdr3', 'cdr3_seq', 'h3_sequence'],
-    'cdr2_sequence': ['cdr2_sequence', 'cdr2', 'cdr2_seq', 'h2_sequence'],
-    'cdr1_sequence': ['cdr1_sequence', 'cdr1', 'cdr1_seq', 'h1_sequence'],
-    'rf2_pred_lddt': ['rf2_pred_lddt', 'pred_lddt', 'plddt'],
-    'rf2_interaction_pae': ['rf2_interaction_pae', 'interaction_pae', 'pae'],
-    'rf2_framework_aligned_cdr_rmsd': ['rf2_framework_aligned_cdr_rmsd', 'framework_aligned_cdr_rmsd', 'cdr_rmsd'],
-    'rf2_passed_filter': ['rf2_passed_filter', 'passed_filter', 'rf2_pass', 'rf2_pass_filter'],
-    'rf2_filter_reason': ['rf2_filter_reason', 'filter_reason'],
-    'backbone_id': ['backbone_id', 'backbone'],
-    'design_id': ['design_id', 'design'],
-    'target_id': ['target_id', 'target'],
-    'final_candidate': ['final_candidate', 'is_candidate', 'selected'],
-    'af3_analyzed': ['af3_analyzed', 'af3_was_analyzed'],
-    'schrodinger_analyzed': ['schrodinger_analyzed', 'schrodinger_was_analyzed'],
-    'af3_passed_filter': ['af3_passed_filter', 'af3_pass'],
-    'schrodinger_passed_filter': ['schrodinger_passed_filter', 'schrodinger_pass'],
-    'funnel_stage': ['funnel_stage', 'stage'],
-}
+from csco_config import (
+    AMINO_ACIDS, AROMATIC, POSITIVE, NEGATIVE, HYDROPHOBIC, GLYCINE, SERINE, PROLINE,
+    ESM2_MODEL_REGISTRY, DEFAULT_CONFIG, STAGE_NAMES,
+    TREATMENT_VARS, TREATMENT_VARS_EXTENDED, CONFOUNDER_COLS, CDR3_FEATURE_COLS,
+    COLUMN_SCHEMA, COLUMN_ALIASES,
+    extract_cdr3_features, get_optimization_target,
+)
 
 # ═══════════════════════════════════════════════════════════════
 # 进度持久化
@@ -204,7 +61,6 @@ class ProgressTracker:
             json.dump(self.state, f, indent=2, default=str)
 
     def _notify(self, event_type, stage, detail=""):
-        """写入人类可读的通知文件，供外部工具(VPN断连恢复系统)读取"""
         notify_file = self.notify_dir / f"{event_type}_{stage}_{int(time.time())}.txt"
         lines = [
             f"EVENT: {event_type}",
@@ -215,7 +71,6 @@ class ProgressTracker:
         ]
         with open(notify_file, 'w') as f:
             f.write('\n'.join(lines))
-        # 同时更新一个固定的最新状态文件，方便快速读取
         latest_file = self.notify_dir / "LATEST_STATUS.txt"
         with open(latest_file, 'w') as f:
             f.write(f"[{datetime.now().strftime('%H:%M:%S')}] {event_type}: {stage}\n")
@@ -388,45 +243,6 @@ class DataAdapter:
         return self.df
 
 # ═══════════════════════════════════════════════════════════════
-# CDR3特征提取
-# ═══════════════════════════════════════════════════════════════
-
-def extract_cdr3_features(cdr3_seq):
-    if pd.isna(cdr3_seq) or len(str(cdr3_seq)) == 0:
-        return {
-            'cdr3_len': 0, 'positive_count': 0, 'positive_ratio': 0.0,
-            'aromatic_count': 0, 'aromatic_ratio': 0.0,
-            'glycine_count': 0, 'glycine_ratio': 0.0,
-            'serine_count': 0, 'serine_ratio': 0.0,
-            'proline_count': 0, 'proline_ratio': 0.0,
-            'hydrophobic_ratio': 0.0, 'negative_ratio': 0.0,
-            'first_residue': 'X', 'last_residue': 'X',
-            'has_ggg': False, 'has_sss': False, 'has_ll': False,
-        }
-    s = str(cdr3_seq)
-    n = len(s)
-    return {
-        'cdr3_len': n,
-        'positive_count': sum(1 for a in s if a in POSITIVE),
-        'positive_ratio': sum(1 for a in s if a in POSITIVE) / n,
-        'aromatic_count': sum(1 for a in s if a in AROMATIC),
-        'aromatic_ratio': sum(1 for a in s if a in AROMATIC) / n,
-        'glycine_count': sum(1 for a in s if a in GLYCINE),
-        'glycine_ratio': sum(1 for a in s if a in GLYCINE) / n,
-        'serine_count': sum(1 for a in s if a in SERINE),
-        'serine_ratio': sum(1 for a in s if a in SERINE) / n,
-        'proline_count': sum(1 for a in s if a in PROLINE),
-        'proline_ratio': sum(1 for a in s if a in PROLINE) / n,
-        'hydrophobic_ratio': sum(1 for a in s if a in HYDROPHOBIC) / n,
-        'negative_ratio': sum(1 for a in s if a in NEGATIVE) / n,
-        'first_residue': s[0],
-        'last_residue': s[-1],
-        'has_ggg': 'GGG' in s,
-        'has_sss': 'SSS' in s.upper(),
-        'has_ll': 'LL' in s,
-    }
-
-# ═══════════════════════════════════════════════════════════════
 # 阶段1: 数据工程
 # ═══════════════════════════════════════════════════════════════
 
@@ -466,7 +282,15 @@ def stage_data_engineering(df, output_dir, config):
     feat_df = pd.DataFrame(features_list)
     feat_df.to_csv(out / "feature_matrix.csv", index=False)
 
-    survival_records = []
+    survival_records = _build_survival_data(feat_df)
+    surv_df = pd.DataFrame(survival_records)
+    surv_df.to_csv(out / "survival_data.csv", index=False)
+
+    print(f"  Feature matrix: {feat_df.shape}, Survival data: {surv_df.shape}")
+    return {"n_samples": len(df), "n_features": len(feat_df.columns)}
+
+def _build_survival_data(feat_df):
+    records = []
     for _, row in feat_df.iterrows():
         stage_times = {1: row['rf2_passed'], 2: row['af3_passed'],
                        3: row['schrodinger_passed'], 4: row['final_candidate']}
@@ -480,7 +304,7 @@ def stage_data_engineering(df, output_dir, config):
             t, event = 4, 1
         else:
             t, event = 4, 0
-        survival_records.append({
+        records.append({
             'global_sequence_index': row['global_sequence_index'],
             'time': t, 'event': event,
             'cdr3_len': row['cdr3_len'], 'positive_ratio': row['positive_ratio'],
@@ -491,12 +315,7 @@ def stage_data_engineering(df, output_dir, config):
             'backbone_id': row['backbone_id'],
             'rf2_interaction_pae': row['rf2_interaction_pae'], 'rf2_pred_lddt': row['rf2_pred_lddt'],
         })
-
-    surv_df = pd.DataFrame(survival_records)
-    surv_df.to_csv(out / "survival_data.csv", index=False)
-
-    print(f"  Feature matrix: {feat_df.shape}, Survival data: {surv_df.shape}")
-    return {"n_samples": len(df), "n_features": len(feat_df.columns)}
+    return records
 
 # ═══════════════════════════════════════════════════════════════
 # 阶段2: 分层归因与动态阈值校准
@@ -519,16 +338,26 @@ def stage_layer1_stratified(output_dir, config):
     sv = surv_df['event'] == 0
     print(f"  RF2失败: {s1.sum()} ({s1.sum()/total*100:.1f}%), AF3失败: {s2.sum()}, 最终候选: {sv.sum()}")
 
+    _plot_attrition_funnel(out, stages=['RF2', 'AF3', 'Schrödinger', 'Desmond', 'Candidate'],
+                           counts=[s1.sum(), s2.sum(), s3.sum(), s4.sum(), sv.sum()], total=total)
+
+    cox_results = _run_cox_regression(surv_df, out)
+    _plot_km_curves(surv_df, out)
+    _run_threshold_sensitivity(feat_df, out)
+
+    target_label = config.get('optimization_target', 'final_candidate')
+    _plot_cdr3_length_analysis(feat_df, out, target_label=target_label)
+
+    return {"cox_concordance": cox_results['concordance']}
+
+def _plot_attrition_funnel(out, stages, counts, total):
     fig, axes = plt.subplots(1, 2, figsize=(14, 6))
-    stages = ['RF2', 'AF3', 'Schrödinger', 'Desmond', 'Candidate']
-    counts = [s1.sum(), s2.sum(), s3.sum(), s4.sum(), sv.sum()]
     colors = ['#e74c3c', '#e67e22', '#f1c40f', '#3498db', '#2ecc71']
     axes[0].bar(stages, counts, color=colors)
     axes[0].set_title('Attrition by Pipeline Stage')
     axes[0].set_ylabel('Sequences')
     for i, v in enumerate(counts):
         axes[0].text(i, v + 50, str(v), ha='center')
-
     cum_stages = ['Start'] + stages
     cumulative = [total]
     rem = total
@@ -543,17 +372,20 @@ def stage_layer1_stratified(output_dir, config):
     plt.savefig(out / 'layer1_attrition_funnel.png', dpi=150, bbox_inches='tight')
     plt.close()
 
+def _run_cox_regression(surv_df, out):
+    from lifelines import CoxPHFitter
+    cox_vars_centered = ['cdr3_len', 'positive_ratio', 'aromatic_ratio', 'glycine_ratio', 'serine_ratio', 'hydrophobic_ratio']
     cox_df = surv_df.copy()
-    for v in ['cdr3_len', 'positive_ratio', 'aromatic_ratio', 'glycine_ratio', 'serine_ratio', 'hydrophobic_ratio']:
+    for v in cox_vars_centered:
         cox_df[f'{v}_centered'] = cox_df[v] - cox_df[v].mean()
-    cox_vars = [f'{v}_centered' for v in ['cdr3_len', 'positive_ratio', 'aromatic_ratio', 'glycine_ratio', 'serine_ratio', 'hydrophobic_ratio']]
-    cox_data = cox_df[['time', 'event'] + cox_vars].dropna()
+    cox_var_names = [f'{v}_centered' for v in cox_vars_centered]
+    cox_data = cox_df[['time', 'event'] + cox_var_names].dropna()
     cph = CoxPHFitter()
     cph.fit(cox_data, duration_col='time', event_col='event')
     cph.print_summary()
 
     hr_results = []
-    for var in cox_vars:
+    for var in cox_var_names:
         coef = cph.params_[var]
         hr = np.exp(coef)
         ci_l = np.exp(cph.confidence_intervals_.loc[var, '95% lower-bound'])
@@ -576,6 +408,10 @@ def stage_layer1_stratified(output_dir, config):
     plt.savefig(out / 'layer1_forest_plot.png', dpi=150, bbox_inches='tight')
     plt.close()
 
+    return {'concordance': cph.concordance_index_}
+
+def _plot_km_curves(surv_df, out):
+    from lifelines import KaplanMeierFitter
     fig, ax = plt.subplots(figsize=(10, 7))
     kmf = KaplanMeierFitter()
     for label, mask in {'5-7': surv_df['cdr3_len'].isin([5,6,7]), '8-9': surv_df['cdr3_len'].isin([8,9]), '10+': surv_df['cdr3_len']>=10}.items():
@@ -586,6 +422,7 @@ def stage_layer1_stratified(output_dir, config):
     plt.savefig(out / 'layer1_km_by_cdr3_length.png', dpi=150, bbox_inches='tight')
     plt.close()
 
+def _run_threshold_sensitivity(feat_df, out):
     lddt_values = feat_df['rf2_pred_lddt'].values.astype(float)
     pae_values = feat_df['rf2_interaction_pae'].values.astype(float)
     final_candidates = feat_df['final_candidate'].values.astype(bool)
@@ -595,14 +432,17 @@ def stage_layer1_stratified(output_dir, config):
         tp = np.sum(pred_pass & final_candidates)
         fp = np.sum(pred_pass & ~final_candidates)
         fn = np.sum(~pred_pass & final_candidates)
-        tn = np.sum(~pred_pass & ~final_candidates)
         sens_results.append({
             'threshold': thresh, 'pass_rate': pred_pass.sum() / len(pred_pass),
             'sensitivity': tp / max(tp + fn, 1), 'precision': tp / max(tp + fp, 1),
         })
     pd.DataFrame(sens_results).to_csv(out / 'threshold_sensitivity.csv', index=False)
 
-    len_pass = feat_df.groupby('cdr3_len').agg(total=('rf2_passed', 'count'), rf2_pass=('rf2_passed', 'sum'), final_cand=('final_candidate', 'sum')).reset_index()
+def _plot_cdr3_length_analysis(feat_df, out, target_label='final_candidate'):
+    target_col = 'final_candidate' if target_label == 'final_candidate' and 'final_candidate' in feat_df.columns else 'rf2_passed'
+    len_pass = feat_df.groupby('cdr3_len').agg(
+        total=(target_col, 'count'), rf2_pass=('rf2_passed', 'sum'), final_cand=('final_candidate', 'sum')
+    ).reset_index()
     len_pass['rf2_pass_rate'] = len_pass['rf2_pass'] / len_pass['total'] * 100
     len_pass['candidate_rate'] = len_pass['final_cand'] / len_pass['total'] * 100
 
@@ -616,8 +456,6 @@ def stage_layer1_stratified(output_dir, config):
     plt.tight_layout()
     plt.savefig(out / 'layer1_cdr3_length_analysis.png', dpi=150, bbox_inches='tight')
     plt.close()
-
-    return {"cox_concordance": cph.concordance_index_}
 
 # ═══════════════════════════════════════════════════════════════
 # 阶段3: 因果约束引擎
@@ -634,17 +472,29 @@ def stage_layer2_causal(output_dir, config):
     plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'SimHei', 'DejaVu Sans']
     plt.rcParams['axes.unicode_minus'] = False
 
-    treatment_vars = ['cdr3_len', 'positive_ratio', 'aromatic_ratio', 'glycine_ratio', 'serine_ratio', 'proline_count']
     outcome_binary = 'rf2_passed'
     outcome_continuous = 'rf2_interaction_pae'
 
     feat_df['first_is_aromatic'] = feat_df['first_residue'].isin(['Y', 'W', 'F']).astype(int)
     feat_df['last_is_YH'] = feat_df['last_residue'].isin(['Y', 'H']).astype(int)
-    treatment_vars_extended = treatment_vars + ['first_is_aromatic', 'last_is_YH']
 
-    causal_cols = treatment_vars_extended + [outcome_binary, outcome_continuous, 'backbone_id']
+    causal_cols = TREATMENT_VARS_EXTENDED + [outcome_binary, outcome_continuous, 'backbone_id']
     causal_data = feat_df[causal_cols].copy()
     causal_data[outcome_binary] = causal_data[outcome_binary].astype(int)
+
+    domain_constraints = [(o, t) for o in [outcome_binary, outcome_continuous] for t in TREATMENT_VARS_EXTENDED]
+    dag, nodes, sep_sets = _pc_algorithm(causal_data, alpha=0.01, domain_constraints=domain_constraints)
+    _plot_causal_dag(dag, nodes, out, TREATMENT_VARS_EXTENDED, outcome_binary, outcome_continuous)
+
+    ate_results, stratified_results = _estimate_all_ate(feat_df, out, outcome_binary, outcome_continuous)
+    _plot_ate_forest(ate_results, out, outcome_binary)
+
+    return {"n_ate_results": len(ate_results), "n_stratified_results": len(stratified_results)}
+
+def _pc_algorithm(data, alpha=0.01, domain_constraints=None):
+    from scipy import stats
+    from itertools import combinations
+    from sklearn.linear_model import LinearRegression
 
     def partial_corr_test(x, y, z_data, alpha=0.05):
         if z_data.shape[1] == 0:
@@ -654,53 +504,51 @@ def stage_layer2_causal(output_dir, config):
         lr.fit(z_data, y); res_y = y - lr.predict(z_data)
         return stats.pearsonr(res_x, res_y)
 
-    def pc_algorithm(data, alpha=0.01, domain_constraints=None):
-        nodes = list(data.columns); n = len(nodes)
-        adj = {i: set(range(n)) - {i} for i in range(n)}
-        sep_sets = {}
-        if domain_constraints is None: domain_constraints = []
-        depth = 0
-        while depth <= 3:
-            removed = []
-            for i in range(n):
-                for j in list(adj[i]):
-                    if j not in adj[i]: continue
-                    neighbors = adj[i] - {j}
-                    if len(neighbors) < depth: continue
-                    for cond_set in combinations(neighbors, depth):
-                        cond_vars = [nodes[k] for k in cond_set]
-                        z_data = data[cond_vars].values if cond_vars else np.empty((len(data), 0))
-                        _, p = partial_corr_test(data[nodes[i]].values, data[nodes[j]].values, z_data)
-                        if p > alpha:
-                            adj[i].discard(j); adj[j].discard(i)
-                            sep_sets[(i,j)] = cond_set; sep_sets[(j,i)] = cond_set
-                            removed.append((i,j)); break
-            if not removed: break
-            depth += 1
-        dag = {i: set() for i in range(n)}
+    nodes = list(data.columns); n = len(nodes)
+    adj = {i: set(range(n)) - {i} for i in range(n)}
+    sep_sets = {}
+    if domain_constraints is None: domain_constraints = []
+    depth = 0
+    while depth <= 3:
+        removed = []
         for i in range(n):
-            for j in adj[i]:
-                if j in adj[i] and i in adj[j]:
-                    is_constrained = any(nodes[j]==src and nodes[i]==dst for src,dst in domain_constraints)
-                    if is_constrained: dag[j].add(i)
-                    elif (i,j) in sep_sets: dag[i].add(j)
-                    elif (j,i) in sep_sets: dag[j].add(i)
-                    elif abs(data[nodes[i]].corr(data[nodes[j]])) > 0: dag[i].add(j)
-                elif j in adj[i]: dag[i].add(j)
-        return dag, nodes, sep_sets
+            for j in list(adj[i]):
+                if j not in adj[i]: continue
+                neighbors = adj[i] - {j}
+                if len(neighbors) < depth: continue
+                for cond_set in combinations(neighbors, depth):
+                    cond_vars = [nodes[k] for k in cond_set]
+                    z_data = data[cond_vars].values if cond_vars else np.empty((len(data), 0))
+                    _, p = partial_corr_test(data[nodes[i]].values, data[nodes[j]].values, z_data)
+                    if p > alpha:
+                        adj[i].discard(j); adj[j].discard(i)
+                        sep_sets[(i,j)] = cond_set; sep_sets[(j,i)] = cond_set
+                        removed.append((i,j)); break
+        if not removed: break
+        depth += 1
+    dag = {i: set() for i in range(n)}
+    for i in range(n):
+        for j in adj[i]:
+            if j in adj[i] and i in adj[j]:
+                is_constrained = any(nodes[j]==src and nodes[i]==dst for src,dst in domain_constraints)
+                if is_constrained: dag[j].add(i)
+                elif (i,j) in sep_sets: dag[i].add(j)
+                elif (j,i) in sep_sets: dag[j].add(i)
+                elif abs(data[nodes[i]].corr(data[nodes[j]])) > 0: dag[i].add(j)
+            elif j in adj[i]: dag[i].add(j)
+    return dag, nodes, sep_sets
 
-    domain_constraints = [(o, t) for o in [outcome_binary, outcome_continuous] for t in treatment_vars_extended]
-    dag, nodes, sep_sets = pc_algorithm(causal_data, alpha=0.01, domain_constraints=domain_constraints)
-
-    fig, ax = plt.subplots(figsize=(14, 10))
+def _plot_causal_dag(dag, nodes, out, treatment_vars_ext, outcome_binary, outcome_continuous):
     pos = {}
-    for i, node in enumerate(treatment_vars[:6]): pos[node] = (i*2, 2)
+    for i, node in enumerate(TREATMENT_VARS[:6]): pos[node] = (i*2, 2)
     for i, node in enumerate(['first_is_aromatic', 'last_is_YH']): pos[node] = (i*2+3, 1)
     for i, node in enumerate([outcome_binary, outcome_continuous]): pos[node] = (i*2+4, 0)
     pos['backbone_id'] = (0, 0.5)
+
+    fig, ax = plt.subplots(figsize=(14, 10))
     for node_name, (x, y) in pos.items():
         if node_name in nodes:
-            color = '#e74c3c' if node_name in [outcome_binary, outcome_continuous] else '#3498db' if node_name in treatment_vars_extended else '#95a5a6'
+            color = '#e74c3c' if node_name in [outcome_binary, outcome_continuous] else '#3498db' if node_name in treatment_vars_ext else '#95a5a6'
             ax.scatter(x, y, s=2000, c=color, zorder=5, alpha=0.8)
             ax.text(x, y, node_name, ha='center', va='center', fontsize=8, fontweight='bold', zorder=6)
     for src in range(len(nodes)):
@@ -712,6 +560,11 @@ def stage_layer2_causal(output_dir, config):
     plt.tight_layout()
     plt.savefig(out / 'layer2_causal_dag.png', dpi=150, bbox_inches='tight')
     plt.close()
+
+def _estimate_all_ate(feat_df, out, outcome_binary, outcome_continuous):
+    from scipy import stats
+    from sklearn.linear_model import LinearRegression, LogisticRegression
+    from sklearn.model_selection import cross_val_predict
 
     def backdoor_ate(data, treatment, outcome, confounders, binary_treatment=False):
         if binary_treatment:
@@ -736,8 +589,10 @@ def stage_layer2_causal(output_dir, config):
             return ate, (se, t_stat, p_value, ate - 1.96*se, ate + 1.96*se)
 
     ate_results = []
-    for tv in treatment_vars_extended:
+    for tv in TREATMENT_VARS_EXTENDED:
         confounders = ['backbone_id']
+        if tv != 'cdr3_len':
+            confounders.append('cdr3_len')
         if tv in ['cdr3_len', 'proline_count']:
             feat_df[f'{tv}_binary'] = (feat_df[tv] > feat_df[tv].median()).astype(int)
             ate, _ = backdoor_ate(feat_df, f'{tv}_binary', outcome_binary, confounders, binary_treatment=True)
@@ -748,6 +603,63 @@ def stage_layer2_causal(output_dir, config):
     ate_df = pd.DataFrame(ate_results)
     ate_df.to_csv(out / 'ate_estimates.csv', index=False)
 
+    stratified_results = _estimate_stratified_ate(feat_df, out, outcome_continuous)
+    return ate_results, stratified_results
+
+
+def _estimate_stratified_ate(feat_df, out, outcome_continuous):
+    from scipy import stats
+    from sklearn.linear_model import LinearRegression
+
+    target_lengths = sorted(feat_df['cdr3_len'].unique())
+    stratified_results = []
+
+    for length in target_lengths:
+        sub = feat_df[feat_df['cdr3_len'] == length]
+        if len(sub) < 50:
+            continue
+
+        for tv in TREATMENT_VARS_EXTENDED:
+            if tv == 'cdr3_len':
+                continue
+            confounders = ['backbone_id']
+            try:
+                T = sub[tv].values.reshape(-1, 1).astype(float)
+                Y = sub[outcome_continuous].values.astype(float)
+                X_c = sub[confounders].values.astype(float)
+                valid = ~(np.isnan(T.flatten()) | np.isnan(Y) | np.any(np.isnan(X_c), axis=1))
+                T = T[valid]; Y = Y[valid]; X_c = X_c[valid]
+                if len(Y) < 30:
+                    continue
+                X_full = np.hstack([T, X_c])
+                lr = LinearRegression().fit(X_full, Y)
+                ate = lr.coef_[0]
+                n = len(Y); k = X_full.shape[1]
+                res = Y - lr.predict(X_full)
+                mse = np.sum(res**2) / max(n - k - 1, 1)
+                try:
+                    inv_d = np.linalg.inv(X_full.T @ X_full)[0, 0]
+                except np.linalg.LinAlgError:
+                    inv_d = np.linalg.pinv(X_full.T @ X_full)[0, 0]
+                se = np.sqrt(mse * inv_d)
+                t_stat = ate / se
+                p_val = 2 * (1 - stats.t.cdf(abs(t_stat), df=n - k - 1))
+                stratified_results.append({
+                    'cdr3_len': int(length), 'n_samples': len(Y),
+                    'treatment': tv, 'outcome': outcome_continuous,
+                    'ATE': round(ate, 4), 'SE': round(se, 4),
+                    't_stat': round(t_stat, 2), 'p_value': p_val,
+                })
+            except Exception:
+                continue
+
+    if stratified_results:
+        strat_df = pd.DataFrame(stratified_results)
+        strat_df.to_csv(out / 'stratified_ate_estimates.csv', index=False)
+    return stratified_results
+
+def _plot_ate_forest(ate_results, out, outcome_binary):
+    ate_df = pd.DataFrame(ate_results)
     fig, ax = plt.subplots(figsize=(12, 8))
     binary_ate = ate_df[ate_df['outcome'] == outcome_binary].sort_values('ATE', ascending=True)
     ax.barh(range(len(binary_ate)), binary_ate['ATE'], color=['#e74c3c' if p<0.05 else '#95a5a6' for p in binary_ate['p_value']], alpha=0.7, height=0.6)
@@ -757,8 +669,6 @@ def stage_layer2_causal(output_dir, config):
     plt.tight_layout()
     plt.savefig(out / 'layer2_ate_forest.png', dpi=150, bbox_inches='tight')
     plt.close()
-
-    return {"n_ate_results": len(ate_df)}
 
 # ═══════════════════════════════════════════════════════════════
 # 阶段4: ESM-2编码
@@ -795,8 +705,7 @@ def _encode_single_model(model_name, sequences, device, batch_size):
                         tokens = tokens.to(device)
                         result = model(tokens, repr_layers=repr_layers)
                         embeddings[i] = result['representations'][repr_layers[0]][0, 1:len(str(sequences[i]))+1].mean(dim=0).cpu().numpy()
-                except Exception as e2:
-                    print(f"  序列 {i} 编码失败: {e2}")
+                except Exception:
                     embeddings[i] = np.zeros(embed_dim, dtype=np.float32)
         if (start // batch_size) % 50 == 0:
             print(f"    [{model_name}] 进度: {end}/{n_seqs} ({end/n_seqs*100:.1f}%)")
@@ -807,7 +716,6 @@ def _encode_single_model(model_name, sequences, device, batch_size):
 
 def _fuse_embeddings(embed_dict, strategy, target_dim=None):
     parts = list(embed_dict.values())
-    names = list(embed_dict.keys())
     if strategy == "concat":
         fused = np.hstack(parts)
         print(f"  融合策略=concat, 输出维度: {fused.shape[1]}")
@@ -882,6 +790,86 @@ def stage_esm2_encode(output_dir, config):
 # 阶段5: 反事实序列导航
 # ═══════════════════════════════════════════════════════════════
 
+def _double_ml_cate(X, T, Y, n_folds=5, method="causal_forest", inner_n_jobs=1):
+    n = len(Y); cate = np.zeros(n); t_stats = np.zeros(n); se_arr = np.zeros(n)
+    kf = __import__('sklearn.model_selection', fromlist=['KFold']).KFold(n_splits=n_folds, shuffle=True, random_state=42)
+    T_arr = np.asarray(T).ravel()
+    is_discrete_t = len(np.unique(T_arr)) <= 10
+
+    if method == "causal_forest":
+        try:
+            from econml.dml import CausalForestDML
+            from sklearn.ensemble import GradientBoostingRegressor, GradientBoostingClassifier
+            if is_discrete_t:
+                model_t = GradientBoostingClassifier(n_estimators=50, max_depth=3, learning_rate=0.1, random_state=42)
+            else:
+                model_t = GradientBoostingRegressor(n_estimators=50, max_depth=3, learning_rate=0.1, random_state=42)
+            cf = CausalForestDML(
+                model_y=GradientBoostingRegressor(n_estimators=50, max_depth=3, learning_rate=0.1, random_state=42),
+                model_t=model_t,
+                discrete_treatment=is_discrete_t,
+                n_estimators=200, max_depth=4, min_samples_leaf=20,
+                random_state=42, cv=3, n_jobs=inner_n_jobs,
+            )
+            cf.fit(Y, T, X=X, W=None)
+            cate = cf.effect(X).flatten()
+            se_arr = np.sqrt(np.array(cf.effect_inference(X).var.tolist()))
+            t_stats = cate / np.where(se_arr > 1e-8, se_arr, 1e-8)
+            print(f"    CausalForestDML: CATE range [{cate.min():.3f}, {cate.max():.3f}], mean={cate.mean():.3f}")
+            return cate, t_stats, se_arr
+        except (ImportError, Exception) as e:
+            print(f"    CausalForestDML失败: {e}, 降级到R-learner")
+            method = "r_learner"
+
+    if method == "r_learner":
+        import lightgbm as lgb
+        from sklearn.ensemble import GradientBoostingRegressor as GBR
+        for fold_i, (train_idx, test_idx) in enumerate(kf.split(X)):
+            X_tr, X_te = X[train_idx], X[test_idx]
+            T_tr, T_te = T[train_idx], T[test_idx]
+            Y_tr, Y_te = Y[train_idx], Y[test_idx]
+            m_y = lgb.LGBMRegressor(n_estimators=100, max_depth=4, learning_rate=0.1, verbose=-1, n_jobs=inner_n_jobs, random_state=42)
+            m_y.fit(X_tr, Y_tr); Y_resid = Y_te - m_y.predict(X_te)
+            m_t = lgb.LGBMClassifier(n_estimators=100, max_depth=4, learning_rate=0.1, verbose=-1, n_jobs=inner_n_jobs, random_state=42)
+            m_t.fit(X_tr, T_tr)
+            ps = m_t.predict_proba(X_te)[:, 1]
+            ps = np.clip(ps, 0.1, 0.9)
+            T_resid = T_te - ps
+            ss = np.sum(T_resid**2)
+            if ss < 1e-8: continue
+            cate_fold = Y_resid * T_resid / (T_resid**2 + 1e-6)
+            cate_fold = np.clip(cate_fold, -50, 50)
+            hetero_model = GBR(n_estimators=50, max_depth=3, learning_rate=0.1, random_state=42)
+            hetero_model.fit(X_te, cate_fold)
+            cate[test_idx] = hetero_model.predict(X_te)
+            cate[test_idx] = np.clip(cate[test_idx], -50, 50)
+            residuals = Y_resid - cate[test_idx] * T_resid
+            fold_se = np.sqrt(np.sum(residuals**2) / (n-1) / max(ss, 1e-8))
+            se_arr[test_idx] = fold_se
+            t_stats[test_idx] = cate[test_idx] / fold_se if fold_se > 0 else 0
+        print(f"    R-learner: CATE range [{cate.min():.3f}, {cate.max():.3f}], mean={cate.mean():.3f}")
+        return cate, t_stats, se_arr
+
+    import lightgbm as lgb
+    for fold_i, (train_idx, test_idx) in enumerate(kf.split(X)):
+        X_tr, X_te = X[train_idx], X[test_idx]
+        T_tr, T_te = T[train_idx], T[test_idx]
+        Y_tr, Y_te = Y[train_idx], Y[test_idx]
+        m_y = lgb.LGBMRegressor(n_estimators=50, max_depth=4, learning_rate=0.1, verbose=-1, n_jobs=inner_n_jobs, random_state=42)
+        m_y.fit(X_tr, Y_tr); Y_resid = Y_te - m_y.predict(X_te)
+        m_t = lgb.LGBMClassifier(n_estimators=50, max_depth=4, learning_rate=0.1, verbose=-1, n_jobs=inner_n_jobs, random_state=42)
+        m_t.fit(X_tr, T_tr); T_resid = T_te - m_t.predict_proba(X_te)[:, 1]
+        ss = np.sum(T_resid**2)
+        if ss < 1e-8: continue
+        theta = np.sum(T_resid * Y_resid) / ss
+        cate[test_idx] = theta
+        residuals = Y_resid - theta * T_resid
+        se = np.sqrt(np.sum(residuals**2) / (n-1) / ss)
+        se_arr[test_idx] = se
+        t_stats[test_idx] = theta / se if se > 0 else 0
+    print(f"    PLR Double ML: CATE={cate.mean():.3f} (constant)")
+    return cate, t_stats, se_arr
+
 def stage_layer3_counterfactual(output_dir, config):
     from sklearn.linear_model import Ridge
     from sklearn.model_selection import KFold
@@ -895,120 +883,90 @@ def stage_layer3_counterfactual(output_dir, config):
     plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'SimHei', 'DejaVu Sans']
     plt.rcParams['axes.unicode_minus'] = False
 
-    rf2_failed = feat_df[feat_df['rf2_passed'] == False]
-    rf2_passed = feat_df[feat_df['rf2_passed'] == True]
-    failed_idx = rf2_failed.index.values
-    passed_idx = rf2_passed.index.values
-    X_all = embeddings.copy()
-    Y_binary = feat_df['rf2_passed'].values.astype(int)
-    Y_pae = feat_df['rf2_interaction_pae'].values.astype(float)
-    print(f"  RF2失败: {len(failed_idx)}, 通过: {len(passed_idx)}")
+    Y_binary, Y_pae, target_label = get_optimization_target(feat_df, config)
 
-    def double_ml_cate(X, T, Y, n_folds=5, method="causal_forest"):
-        n = len(Y); cate = np.zeros(n); t_stats = np.zeros(n); se_arr = np.zeros(n)
-        kf = KFold(n_splits=n_folds, shuffle=True, random_state=42)
-        T_arr = np.asarray(T).ravel()
-        is_discrete_t = len(np.unique(T_arr)) <= 10
-        if method == "causal_forest":
-            try:
-                from econml.dml import CausalForestDML
-                from sklearn.ensemble import GradientBoostingRegressor, GradientBoostingClassifier
-                if is_discrete_t:
-                    model_t = GradientBoostingClassifier(n_estimators=100, max_depth=3, learning_rate=0.05, random_state=42)
-                else:
-                    model_t = GradientBoostingRegressor(n_estimators=100, max_depth=3, learning_rate=0.05, random_state=42)
-                cf = CausalForestDML(
-                    model_y=GradientBoostingRegressor(n_estimators=100, max_depth=3, learning_rate=0.05, random_state=42),
-                    model_t=model_t,
-                    discrete_treatment=is_discrete_t,
-                    n_estimators=1000, max_depth=5, min_samples_leaf=10,
-                    random_state=42, cv=5, n_jobs=-1,
-                )
-                cf.fit(Y, T, X=X, W=None)
-                cate = cf.effect(X).flatten()
-                se_arr = cf.effect_inference(X).var.tolist()
-                se_arr = np.sqrt(np.array(se_arr))
-                t_stats = cate / np.where(se_arr > 1e-8, se_arr, 1e-8)
-                print(f"    CausalForestDML: CATE range [{cate.min():.3f}, {cate.max():.3f}], mean={cate.mean():.3f}")
-                return cate, t_stats, se_arr
-            except (ImportError, Exception) as e:
-                print(f"    CausalForestDML失败: {e}, 降级到R-learner")
-                method = "r_learner"
-        if method == "r_learner":
-            for fold_i, (train_idx, test_idx) in enumerate(kf.split(X)):
-                X_tr, X_te = X[train_idx], X[test_idx]
-                T_tr, T_te = T[train_idx], T[test_idx]
-                Y_tr, Y_te = Y[train_idx], Y[test_idx]
-                m_y = lgb.LGBMRegressor(n_estimators=200, max_depth=5, learning_rate=0.05, verbose=-1, random_state=42)
-                m_y.fit(X_tr, Y_tr); Y_resid = Y_te - m_y.predict(X_te)
-                m_t = lgb.LGBMClassifier(n_estimators=200, max_depth=5, learning_rate=0.05, verbose=-1, random_state=42)
-                m_t.fit(X_tr, T_tr)
-                ps = m_t.predict_proba(X_te)[:, 1]
-                ps = np.clip(ps, 0.1, 0.9)
-                T_resid = T_te - ps
-                ss = np.sum(T_resid**2)
-                if ss < 1e-8: continue
-                cate_fold = Y_resid * T_resid / (T_resid**2 + 1e-6)
-                cate_fold = np.clip(cate_fold, -50, 50)
-                from sklearn.ensemble import GradientBoostingRegressor as GBR
-                hetero_model = GBR(n_estimators=100, max_depth=3, learning_rate=0.05, random_state=42)
-                hetero_model.fit(X_te, cate_fold)
-                cate[test_idx] = hetero_model.predict(X_te)
-                cate[test_idx] = np.clip(cate[test_idx], -50, 50)
-                residuals = Y_resid - cate[test_idx] * T_resid
-                fold_se = np.sqrt(np.sum(residuals**2) / (n-1) / max(ss, 1e-8))
-                se_arr[test_idx] = fold_se
-                t_stats[test_idx] = cate[test_idx] / fold_se if fold_se > 0 else 0
-            print(f"    R-learner: CATE range [{cate.min():.3f}, {cate.max():.3f}], mean={cate.mean():.3f}")
-            return cate, t_stats, se_arr
-        for fold_i, (train_idx, test_idx) in enumerate(kf.split(X)):
-            X_tr, X_te = X[train_idx], X[test_idx]
-            T_tr, T_te = T[train_idx], T[test_idx]
-            Y_tr, Y_te = Y[train_idx], Y[test_idx]
-            m_y = lgb.LGBMRegressor(n_estimators=100, max_depth=5, learning_rate=0.05, verbose=-1, random_state=42)
-            m_y.fit(X_tr, Y_tr); Y_resid = Y_te - m_y.predict(X_te)
-            m_t = lgb.LGBMClassifier(n_estimators=100, max_depth=5, learning_rate=0.05, verbose=-1, random_state=42)
-            m_t.fit(X_tr, T_tr); T_resid = T_te - m_t.predict_proba(X_te)[:, 1]
-            ss = np.sum(T_resid**2)
-            if ss < 1e-8: continue
-            theta = np.sum(T_resid * Y_resid) / ss
-            cate[test_idx] = theta
-            residuals = Y_resid - theta * T_resid
-            se = np.sqrt(np.sum(residuals**2) / (n-1) / ss)
-            se_arr[test_idx] = se
-            t_stats[test_idx] = theta / se if se > 0 else 0
-        print(f"    PLR Double ML: CATE={cate.mean():.3f} (constant)")
-        return cate, t_stats, se_arr
+    target_col = 'final_candidate' if target_label == 'final_candidate' else 'rf2_passed'
+    target_failed = feat_df[feat_df[target_col] == False]
+    target_passed = feat_df[feat_df[target_col] == True]
+    failed_idx = target_failed.index.values
+    passed_idx = target_passed.index.values
+    X_all = embeddings.copy()
+    print(f"  目标={target_label}: 失败={len(failed_idx)}, 通过={len(passed_idx)}")
 
     cate_method = config.get("cate_method", "causal_forest")
-    cate_pae, tstat_pae, se_pae = double_ml_cate(X_all, Y_binary, Y_pae, method=cate_method)
+    cate_pae, tstat_pae, se_pae = _double_ml_cate(X_all, Y_binary, Y_pae, method=cate_method, inner_n_jobs=-1)
     np.save(out / 'cate_pae.npy', cate_pae)
     np.save(out / 'tstat_pae.npy', tstat_pae)
     np.save(out / 'se_pae.npy', se_pae)
 
-    multi_treatment_results = []
-    treatment_cols = [c for c in ['first_is_aromatic', 'glycine_ratio', 'serine_ratio', 'cdr3_len', 'proline_count', 'last_is_YH'] if c in feat_df.columns]
-    confounder_cols = [c for c in ['backbone_id', 'aromatic_ratio', 'hydrophobic_ratio', 'positive_ratio'] if c in feat_df.columns]
-    for t_col in treatment_cols:
-        T_var = feat_df[t_col].values
-        if T_var.std() < 1e-8: continue
-        T_binary = (T_var > np.median(T_var)).astype(int) if T_var.dtype != int and len(set(T_var)) > 5 else T_var.astype(int)
-        X_conf = X_all.copy()
-        if confounder_cols:
-            conf_data = pd.get_dummies(feat_df[confounder_cols], drop_first=True).values
-            X_conf = np.hstack([X_all, conf_data])
-        cate_t, tstat_t, se_t = double_ml_cate(X_conf, T_binary, Y_pae, method=cate_method)
-        multi_treatment_results.append({
-            'treatment': t_col, 'cate_mean': float(np.mean(cate_t)),
-            'cate_std': float(np.std(cate_t)), 'cate_min': float(np.min(cate_t)),
-            'cate_max': float(np.max(cate_t)), 'n_significant': int(np.sum(np.abs(tstat_t) > 1.96)),
-            'pct_significant': float(np.mean(np.abs(tstat_t) > 1.96) * 100),
-        })
-    pd.DataFrame(multi_treatment_results).to_csv(out / 'multi_treatment_cate.csv', index=False)
+    _run_multi_treatment_cate(feat_df, X_all, Y_pae, out, cate_method)
+    _run_subgroup_discovery(feat_df, cate_pae, out, config)
 
-    n_clusters = config.get("subgroup_n_clusters", 3)
+    pos_cate_df = _run_position_specific_cate(feat_df, embeddings, Y_pae, out, config)
+
+    nn = NearestNeighbors(n_neighbors=5, metric='cosine')
+    nn.fit(embeddings[passed_idx])
+    distances, nn_indices = nn.kneighbors(embeddings[failed_idx])
+    np.save(out / 'nn_distances.npy', distances)
+    np.save(out / 'nn_indices.npy', nn_indices)
+
+    _generate_counterfactual_suggestions(feat_df, failed_idx, passed_idx, cate_pae, se_pae,
+                                          pos_cate_df, nn_indices, out, config)
+
+    _generate_truncation_suggestions(feat_df, failed_idx, out, config)
+
+    _plot_tsne(embeddings, Y_binary, out, config)
+
+    return {"n_counterfactual_suggestions": len(pd.read_csv(out / 'counterfactual_suggestions.csv')) if (out / 'counterfactual_suggestions.csv').exists() else 0,
+            "n_position_cate": len(pos_cate_df)}
+
+def _run_multi_treatment_cate(feat_df, X_all, Y_pae, out, cate_method):
+    import warnings
+    warnings.filterwarnings('ignore', category=UserWarning)
+
+    treatment_cols = [c for c in TREATMENT_VARS_EXTENDED if c in feat_df.columns]
+    confounder_cols = [c for c in CONFOUNDER_COLS if c in feat_df.columns]
+
+    numeric_conf_cols = [c for c in confounder_cols if c != 'backbone_id']
+    conf_numeric = feat_df[numeric_conf_cols].values.astype(np.float32) if numeric_conf_cols else np.empty((len(feat_df), 0), dtype=np.float32)
+    backbone_codes = feat_df['backbone_id'].astype('category').cat.codes.values.astype(np.float32).reshape(-1, 1) if 'backbone_id' in confounder_cols else np.empty((len(feat_df), 0), dtype=np.float32)
+    conf_data = np.hstack([backbone_codes, conf_numeric]) if conf_numeric.shape[1] > 0 or backbone_codes.shape[1] > 0 else None
+
+    X_all_f = np.ascontiguousarray(X_all, dtype=np.float32)
+    Y_pae_f = np.ascontiguousarray(Y_pae, dtype=np.float32)
+
+    multi_treatment_results = []
+    total = len(treatment_cols)
+    for i, t_col in enumerate(treatment_cols):
+        t0 = time.time()
+        try:
+            T_var = feat_df[t_col].values.astype(np.float64)
+            if T_var.std() < 1e-8:
+                print(f"  [{i+1}/{total}] {t_col}: 跳过(方差≈0)")
+                continue
+            T_binary = (T_var > np.median(T_var)).astype(int) if len(np.unique(T_var)) > 5 else T_var.astype(int)
+            X_conf = np.hstack([X_all_f, conf_data]) if conf_data is not None else X_all_f.copy()
+            cate_t, tstat_t, se_t = _double_ml_cate(X_conf, T_binary, Y_pae_f, method=cate_method, inner_n_jobs=1)
+            elapsed = time.time() - t0
+            result = {
+                'treatment': t_col, 'cate_mean': float(np.mean(cate_t)),
+                'cate_std': float(np.std(cate_t)), 'cate_min': float(np.min(cate_t)),
+                'cate_max': float(np.max(cate_t)), 'n_significant': int(np.sum(np.abs(tstat_t) > 1.96)),
+                'pct_significant': float(np.mean(np.abs(tstat_t) > 1.96) * 100),
+            }
+            multi_treatment_results.append(result)
+            print(f"  [{i+1}/{total}] {t_col}: cate_mean={result['cate_mean']:.3f}, {elapsed:.1f}s")
+        except Exception as e:
+            elapsed = time.time() - t0
+            print(f"  [{i+1}/{total}] {t_col}: 失败({e}), {elapsed:.1f}s")
+
+    pd.DataFrame(multi_treatment_results).to_csv(out / 'multi_treatment_cate.csv', index=False)
+    print(f"  完成: {len(multi_treatment_results)}/{total} 个treatment变量")
+
+def _run_subgroup_discovery(feat_df, cate_pae, out, config):
     from sklearn.cluster import KMeans
     from sklearn.preprocessing import StandardScaler
+    n_clusters = config.get("subgroup_n_clusters", 3)
     if cate_pae.std() > 1e-6:
         cate_2d = StandardScaler().fit_transform(cate_pae.reshape(-1, 1))
         km = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
@@ -1021,6 +979,7 @@ def stage_layer3_counterfactual(output_dir, config):
             profile = {
                 'subgroup': sg, 'size': int(mask.sum()),
                 'rf2_pass_rate': float(sg_data['rf2_passed'].mean()) if 'rf2_passed' in sg_data.columns else 0,
+                'final_candidate_rate': float(sg_data['final_candidate'].mean()) if 'final_candidate' in sg_data.columns else 0,
                 'mean_pae': float(sg_data['rf2_interaction_pae'].mean()) if 'rf2_interaction_pae' in sg_data.columns else 0,
                 'mean_cate': float(cate_pae[mask].mean()),
                 'mean_cdr3_len': float(sg_data['cdr3_len'].mean()) if 'cdr3_len' in sg_data.columns else 0,
@@ -1031,6 +990,8 @@ def stage_layer3_counterfactual(output_dir, config):
         pd.DataFrame(subgroup_profiles).to_csv(out / 'subgroup_profiles.csv', index=False)
         print(f"  亚群分析: {n_clusters}个亚群, 大小={[p['size'] for p in subgroup_profiles]}")
 
+def _run_position_specific_cate(feat_df, embeddings, Y_pae, out, config):
+    from sklearn.linear_model import Ridge
     pos_cate_results = []
     for pos in range(config.get("max_cdr3_len", 13)):
         mask_pos = feat_df['cdr3_len'] > pos
@@ -1063,13 +1024,10 @@ def stage_layer3_counterfactual(output_dir, config):
         sns.heatmap(pivot, cmap='RdBu_r', center=0, annot=True, fmt='.1f', ax=ax, cbar_kws={'label': 'CATE'})
         ax.set_title('Position-Specific CATE'); ax.set_xlabel('Position'); ax.set_ylabel('AA')
         plt.tight_layout(); plt.savefig(out / 'layer3_position_cate_heatmap.png', dpi=150, bbox_inches='tight'); plt.close()
+    return pos_cate_df
 
-    nn = NearestNeighbors(n_neighbors=5, metric='cosine')
-    nn.fit(embeddings[passed_idx])
-    distances, nn_indices = nn.kneighbors(embeddings[failed_idx])
-    np.save(out / 'nn_distances.npy', distances)
-    np.save(out / 'nn_indices.npy', nn_indices)
-
+def _generate_counterfactual_suggestions(feat_df, failed_idx, passed_idx, cate_pae, se_pae,
+                                           pos_cate_df, nn_indices, out, config):
     n_process = min(config.get("counterfactual_top_n", 2000), len(failed_idx))
     cf_suggestions = []
     for i in range(n_process):
@@ -1106,6 +1064,8 @@ def stage_layer3_counterfactual(output_dir, config):
     cf_df = pd.DataFrame(cf_suggestions)
     cf_df.to_csv(out / 'counterfactual_suggestions.csv', index=False)
 
+def _generate_truncation_suggestions(feat_df, failed_idx, out, config):
+    n_process = min(config.get("counterfactual_top_n", 2000), len(failed_idx))
     trunc_results = []
     for i in range(min(n_process, len(failed_idx))):
         row = feat_df.iloc[failed_idx[i]]
@@ -1116,6 +1076,8 @@ def stage_layer3_counterfactual(output_dir, config):
             trunc_results.append({'sequence_id': int(row['global_sequence_index']), 'original_cdr3': cdr3, 'original_len': len(cdr3), 'truncated_cdr3': cdr3[:tl], 'target_len': tl})
     pd.DataFrame(trunc_results).to_csv(out / 'truncation_suggestions.csv', index=False)
 
+def _plot_tsne(embeddings, Y_binary, out, config):
+    from sklearn.manifold import TSNE
     sample_size = min(config.get("tsne_sample_size", 3000), len(embeddings))
     np.random.seed(42)
     sample_idx = np.random.choice(len(embeddings), sample_size, replace=False)
@@ -1123,12 +1085,10 @@ def stage_layer3_counterfactual(output_dir, config):
     embeds_2d = tsne.fit_transform(embeddings[sample_idx])
     sample_labels = Y_binary[sample_idx]
     fig, ax = plt.subplots(figsize=(10, 8))
-    ax.scatter(embeds_2d[sample_labels==0,0], embeds_2d[sample_labels==0,1], c='#e74c3c', alpha=0.3, s=10, label='RF2 Failed')
-    ax.scatter(embeds_2d[sample_labels==1,0], embeds_2d[sample_labels==1,1], c='#2ecc71', alpha=0.6, s=20, label='RF2 Passed')
+    ax.scatter(embeds_2d[sample_labels==0,0], embeds_2d[sample_labels==0,1], c='#e74c3c', alpha=0.3, s=10, label='Failed')
+    ax.scatter(embeds_2d[sample_labels==1,0], embeds_2d[sample_labels==1,1], c='#2ecc71', alpha=0.6, s=20, label='Passed')
     ax.set_title('ESM-2 t-SNE'); ax.legend()
     plt.tight_layout(); plt.savefig(out / 'layer3_tsne_embedding.png', dpi=150, bbox_inches='tight'); plt.close()
-
-    return {"n_counterfactual_suggestions": len(cf_df), "n_position_cate": len(pos_cate_df)}
 
 # ═══════════════════════════════════════════════════════════════
 # 阶段6: 规则合成与输出
@@ -1138,78 +1098,135 @@ def stage_layer5_synthesis(output_dir, config):
     out = Path(output_dir)
     feat_df = pd.read_csv(out / "feature_matrix.csv")
 
-    len_pass = feat_df.groupby('cdr3_len').agg(total=('rf2_passed', 'count'), rf2_pass=('rf2_passed', 'sum'), final_cand=('final_candidate', 'sum')).reset_index()
+    target_label = config.get('optimization_target', 'final_candidate')
+    target_col = 'final_candidate' if target_label == 'final_candidate' and 'final_candidate' in feat_df.columns else 'rf2_passed'
+
+    len_pass = feat_df.groupby('cdr3_len').agg(
+        total=(target_col, 'count'), rf2_pass=('rf2_passed', 'sum'), final_cand=('final_candidate', 'sum')
+    ).reset_index()
     len_pass['pass_rate'] = len_pass['rf2_pass'] / len_pass['total']
     valid_lengths = len_pass[len_pass['pass_rate'] > 0.10]['cdr3_len'].tolist()
 
-    first_res = feat_df.groupby('first_residue').agg(total=('rf2_passed', 'count'), rf2_pass=('rf2_passed', 'sum')).reset_index()
+    fc_rate_by_len = feat_df.groupby('cdr3_len')[target_col].mean()
+    dead_zone_lengths = [l for l in valid_lengths if fc_rate_by_len.get(l, 0) < 0.001]
+    if dead_zone_lengths:
+        print(f"  ⚠ 移除FC死区长度(FC率≈0): {dead_zone_lengths}")
+        valid_lengths = [l for l in valid_lengths if l not in dead_zone_lengths]
+
+    first_res = feat_df.groupby('first_residue').agg(total=(target_col, 'count'), rf2_pass=('rf2_passed', 'sum')).reset_index()
     first_res['rate'] = first_res['rf2_pass'] / first_res['total']
     first_whitelist = first_res[first_res['rate'] > 0.40]['first_residue'].tolist()
 
-    last_res = feat_df.groupby('last_residue').agg(total=('rf2_passed', 'count'), rf2_pass=('rf2_passed', 'sum')).reset_index()
+    last_res = feat_df.groupby('last_residue').agg(total=(target_col, 'count'), rf2_pass=('rf2_passed', 'sum')).reset_index()
     last_res['rate'] = last_res['rf2_pass'] / last_res['total']
-    last_whitelist = last_res[last_res['rate'] > 0.10]['last_residue'].tolist()
+    last_whitelist = last_res[last_res['rate'] > 0.15]['last_residue'].tolist()
 
-    best_aromatic = 0.20
-    for t in [0.15, 0.20, 0.25]:
-        if feat_df.loc[feat_df['aromatic_ratio'] >= t, 'rf2_passed'].mean() > 0.15: best_aromatic = t; break
-    best_glycine = 0.20
-    for t in [0.20, 0.15, 0.12]:
-        if feat_df.loc[feat_df['glycine_ratio'] <= t, 'rf2_passed'].mean() > 0.12: best_glycine = t; break
-    best_serine = 0.15
-    for t in [0.20, 0.15, 0.10]:
-        if feat_df.loc[feat_df['serine_ratio'] <= t, 'rf2_passed'].mean() > 0.15: best_serine = t; break
+    best_aromatic = _search_soft_threshold(feat_df, 'aromatic_ratio', '>=', [0.15, 0.20, 0.25], target_col, 0.15, 0.20)
+    best_glycine = _search_soft_threshold(feat_df, 'glycine_ratio', '<=', [0.20, 0.15, 0.12], target_col, 0.12, 0.20)
+    best_serine = _search_soft_threshold(feat_df, 'serine_ratio', '<=', [0.20, 0.15, 0.10], target_col, 0.15, 0.15)
+    best_hydrophobic = _search_soft_threshold(feat_df, 'hydrophobic_ratio', '>=', [0.40, 0.45, 0.50, 0.55], target_col, 0.10, 0.45)
 
-    anti_patterns = []
-    for pattern, col in [('GGG', 'has_ggg'), ('SSS', 'has_sss'), ('LL', 'has_ll')]:
-        if col in feat_df.columns and feat_df[col].sum() > 0:
-            with_rate = feat_df.loc[feat_df[col], 'rf2_passed'].mean()
-            without_rate = feat_df.loc[~feat_df[col], 'rf2_passed'].mean()
-            if with_rate < without_rate * 0.5: anti_patterns.append(pattern)
+    anti_patterns = _detect_anti_patterns(feat_df, target_col)
 
-    success_df = feat_df[feat_df['rf2_passed'] == True]
+    success_df = feat_df[feat_df[target_col] == True]
     success_templates = {}
     for length in sorted(set(valid_lengths)):
         len_s = success_df[success_df['cdr3_len'] == length]
         if len(len_s) == 0: continue
         success_templates[f'length_{length}'] = len_s['cdr3_sequence'].value_counts().head(10).index.tolist()
 
-    salvage_edits = []
-    cf_path = out / 'counterfactual_suggestions.csv'
-    if cf_path.exists():
-        cf_df = pd.read_csv(cf_path)
-        for pattern, count in cf_df['edit'].value_counts().head(30).items():
-            mean_pae = cf_df[cf_df['edit'] == pattern]['predicted_pae_change'].mean()
-            if mean_pae < -0.5:
-                salvage_edits.append({'pattern': pattern, 'count': int(count), 'mean_pae_change': round(mean_pae, 2)})
-
-    trunc_to_7_count = 0
-    trunc_path = out / 'truncation_suggestions.csv'
-    if trunc_path.exists():
-        trunc_df = pd.read_csv(trunc_path)
-        trunc_to_7_count = len(trunc_df[(trunc_df['original_len'] >= 10) & (trunc_df['target_len'] == 7)])
+    salvage_edits = _extract_salvage_edits(out)
+    trunc_to_7_count = _count_truncation_evidence(out)
 
     cox_hr = {}
     cox_path = out / 'cox_hazard_ratios.csv'
     if cox_path.exists():
-        cox_df = pd.read_csv(cox_path)
-        for _, r in cox_df.iterrows(): cox_hr[r['variable']] = round(r['HR'], 2)
+        for _, r in pd.read_csv(cox_path).iterrows(): cox_hr[r['variable']] = round(r['HR'], 2)
 
     ate_vals = {}
     ate_path = out / 'ate_estimates.csv'
     if ate_path.exists():
-        ate_df = pd.read_csv(ate_path)
-        for _, r in ate_df.iterrows():
+        ate_df_file = pd.read_csv(ate_path)
+        for _, r in ate_df_file.iterrows():
             if r['outcome'] == 'rf2_interaction_pae' and r['p_value'] < 0.05:
                 ate_vals[r['treatment']] = round(r['ATE'], 2)
 
+    strat_ate_map = {}
+    strat_path = out / 'stratified_ate_estimates.csv'
+    if strat_path.exists():
+        strat_df = pd.read_csv(strat_path)
+        for _, r in strat_df.iterrows():
+            if r['p_value'] < 0.05:
+                key = (int(r['cdr3_len']), r['treatment'])
+                strat_ate_map[key] = r['ATE']
+
+    length_specific_prefs = {}
+    for length in valid_lengths:
+        l_prefs = {}
+        aro_ate = strat_ate_map.get((length, 'aromatic_ratio'))
+        if aro_ate is not None:
+            if aro_ate > 0:
+                l_prefs['aromatic_min_ratio'] = 0.0
+            elif aro_ate < -1.0:
+                l_prefs['aromatic_min_ratio'] = best_aromatic
+            else:
+                l_prefs['aromatic_min_ratio'] = round(best_aromatic * 0.75, 3)
+        else:
+            l_prefs['aromatic_min_ratio'] = best_aromatic
+
+        gly_ate = strat_ate_map.get((length, 'glycine_ratio'))
+        if gly_ate is not None and gly_ate > 2.0:
+            l_prefs['glycine_max_ratio'] = min(best_glycine, 0.15)
+        else:
+            l_prefs['glycine_max_ratio'] = best_glycine
+
+        ser_ate = strat_ate_map.get((length, 'serine_ratio'))
+        if ser_ate is not None and ser_ate < -2.0:
+            l_prefs['serine_max_ratio'] = 0.4
+        elif ser_ate is not None and ser_ate > 2.0:
+            l_prefs['serine_max_ratio'] = min(best_serine, 0.12)
+        else:
+            l_prefs['serine_max_ratio'] = best_serine
+
+        pro_ate = strat_ate_map.get((length, 'proline_count'))
+        if pro_ate is not None and pro_ate < -2.0:
+            l_prefs['proline_max_count'] = 3
+        elif pro_ate is not None and pro_ate < 0:
+            l_prefs['proline_max_count'] = 2
+        else:
+            l_prefs['proline_max_count'] = 1
+
+        hyd_ate = strat_ate_map.get((length, 'hydrophobic_ratio'))
+        if hyd_ate is not None:
+            if hyd_ate > 1.0:
+                l_prefs['hydrophobic_min_ratio'] = min(best_hydrophobic + 0.05, 0.60)
+            elif hyd_ate > 0:
+                l_prefs['hydrophobic_min_ratio'] = best_hydrophobic
+            else:
+                l_prefs['hydrophobic_min_ratio'] = round(best_hydrophobic * 0.80, 3)
+        else:
+            l_prefs['hydrophobic_min_ratio'] = best_hydrophobic
+
+        first_aro_ate = strat_ate_map.get((length, 'first_is_aromatic'))
+        if first_aro_ate is not None and first_aro_ate > -0.5:
+            l_prefs['first_aromatic_optional'] = True
+
+        length_specific_prefs[str(length)] = l_prefs
+
+    length_weights = {}
+    for _, row in len_pass.iterrows():
+        l = int(row['cdr3_len'])
+        if l in valid_lengths:
+            length_weights[str(l)] = round(row['pass_rate'], 4)
+
     design_strategy = {
-        'strategy_name': 'CSC-O_v1',
+        'strategy_name': 'CSC-O_v2',
         'description': 'Causal-Stratified Counterfactual Optimization for Antibody CDR3 Design',
-        'version': '1.0',
+        'version': '2.0',
         'date': datetime.now().strftime('%Y-%m-%d'),
         'data_source': str(config.get('input_file', '')),
         'data_size': len(feat_df),
+        'optimization_target': target_label,
         'hard_constraints': {
             'cdr3_length_allowed': [int(l) for l in valid_lengths],
             'cdr3_length_preferred': [l for l in [6,7] if l in valid_lengths],
@@ -1218,12 +1235,15 @@ def stage_layer5_synthesis(output_dir, config):
             'cdr3_min_positive_count': 0,
             'cdr3_min_aromatic_first': True,
         },
+        'length_generation_weights': length_weights,
         'soft_preferences': {
             'aromatic_min_ratio': best_aromatic,
             'glycine_max_ratio': best_glycine,
             'serine_max_ratio': best_serine,
             'proline_max_count': 1,
+            'hydrophobic_min_ratio': best_hydrophobic,
         },
+        'length_specific_preferences': length_specific_prefs,
         'anti_patterns': anti_patterns,
         'success_templates': success_templates,
         'salvage_edits': salvage_edits[:20],
@@ -1238,6 +1258,58 @@ def stage_layer5_synthesis(output_dir, config):
     with open(out / 'design_strategy.json', 'w', encoding='utf-8') as f:
         json.dump(design_strategy, f, indent=2, ensure_ascii=False)
 
+    _write_strategy_txt(out, valid_lengths, first_whitelist, last_whitelist,
+                         best_aromatic, best_glycine, best_serine, best_hydrophobic,
+                         anti_patterns, success_templates, salvage_edits)
+    _write_analysis_report(out, config, feat_df, target_label, valid_lengths,
+                            first_whitelist, last_whitelist, anti_patterns, salvage_edits)
+
+    print(f"  策略文件: design_strategy.json, design_strategy.txt, csco_analysis_report.txt")
+    return {"valid_lengths": valid_lengths, "anti_patterns": anti_patterns, "n_salvage_edits": len(salvage_edits)}
+
+def _search_soft_threshold(feat_df, col, direction, thresholds, target_col, min_rate, default):
+    for t in thresholds:
+        if direction == '>=':
+            mask = feat_df[col] >= t
+        else:
+            mask = feat_df[col] <= t
+        if mask.sum() > 0:
+            rate = feat_df.loc[mask, target_col].mean()
+            if rate > min_rate:
+                return t
+    return default
+
+def _detect_anti_patterns(feat_df, target_col):
+    anti_patterns = []
+    for pattern, col in [('GGG', 'has_ggg'), ('SSS', 'has_sss'), ('LL', 'has_ll')]:
+        if col in feat_df.columns and feat_df[col].sum() > 0:
+            with_rate = feat_df.loc[feat_df[col] == 1, target_col].mean()
+            without_rate = feat_df.loc[feat_df[col] == 0, target_col].mean()
+            if without_rate > 0 and with_rate < without_rate * 0.5:
+                anti_patterns.append(pattern)
+    return anti_patterns
+
+def _extract_salvage_edits(out):
+    salvage_edits = []
+    cf_path = out / 'counterfactual_suggestions.csv'
+    if cf_path.exists():
+        cf_df = pd.read_csv(cf_path)
+        for pattern, count in cf_df['edit'].value_counts().head(30).items():
+            mean_pae = cf_df[cf_df['edit'] == pattern]['predicted_pae_change'].mean()
+            if mean_pae < -0.5:
+                salvage_edits.append({'pattern': pattern, 'count': int(count), 'mean_pae_change': round(mean_pae, 2)})
+    return salvage_edits
+
+def _count_truncation_evidence(out):
+    trunc_path = out / 'truncation_suggestions.csv'
+    if trunc_path.exists():
+        trunc_df = pd.read_csv(trunc_path)
+        return len(trunc_df[(trunc_df['original_len'] >= 10) & (trunc_df['target_len'] == 7)])
+    return 0
+
+def _write_strategy_txt(out, valid_lengths, first_whitelist, last_whitelist,
+                          best_aromatic, best_glycine, best_serine, best_hydrophobic,
+                          anti_patterns, success_templates, salvage_edits):
     lines = ['# CSC-O Design Strategy', f'# Generated: {datetime.now().strftime("%Y-%m-%d")}', '']
     lines.append(f'CDR3_LENGTH_ALLOWED = {[int(l) for l in valid_lengths]}')
     lines.append(f'CDR3_FIRST_RESIDUE_WHITELIST = {first_whitelist}')
@@ -1245,6 +1317,7 @@ def stage_layer5_synthesis(output_dir, config):
     lines.append(f'AROMATIC_MIN_RATIO = {best_aromatic}')
     lines.append(f'GLYCINE_MAX_RATIO = {best_glycine}')
     lines.append(f'SERINE_MAX_RATIO = {best_serine}')
+    lines.append(f'HYDROPHOBIC_MIN_RATIO = {best_hydrophobic}')
     lines.append(f'PROLINE_MAX_COUNT = 1')
     for ap in anti_patterns: lines.append(f'FORBIDDEN_PATTERN = {ap}')
     for lk, tmpls in success_templates.items():
@@ -1254,11 +1327,17 @@ def stage_layer5_synthesis(output_dir, config):
     with open(out / 'design_strategy.txt', 'w', encoding='utf-8') as f:
         f.write('\n'.join(lines))
 
+def _write_analysis_report(out, config, feat_df, target_label, valid_lengths,
+                             first_whitelist, last_whitelist, anti_patterns, salvage_edits):
+    target_col = 'final_candidate' if target_label == 'final_candidate' else 'rf2_passed'
     report = ['='*80, 'CSC-O 综合分析报告', '='*80, '']
     report.append(f'数据来源: {config.get("input_file", "")}')
     report.append(f'数据量: {len(feat_df)} 条')
+    report.append(f'优化目标: {target_label}')
     report.append(f'RF2通过率: {feat_df["rf2_passed"].mean()*100:.1f}%')
     report.append(f'最终候选率: {feat_df["final_candidate"].mean()*100:.2f}%')
+    if target_label == 'final_candidate':
+        report.append(f'Final candidate正样本数: {int(feat_df["final_candidate"].sum())}')
     report.append(f'CDR3长度允许值: {valid_lengths}')
     report.append(f'首残基白名单: {first_whitelist}')
     report.append(f'尾残基白名单: {last_whitelist}')
@@ -1267,9 +1346,6 @@ def stage_layer5_synthesis(output_dir, config):
     report.append('='*80)
     with open(out / 'csco_analysis_report.txt', 'w', encoding='utf-8') as f:
         f.write('\n'.join(report))
-
-    print(f"  策略文件: design_strategy.json, design_strategy.txt, csco_analysis_report.txt")
-    return {"valid_lengths": valid_lengths, "anti_patterns": anti_patterns, "n_salvage_edits": len(salvage_edits)}
 
 # ═══════════════════════════════════════════════════════════════
 # 主管线
@@ -1301,18 +1377,8 @@ def run_pipeline(config):
                 adapter = DataAdapter(config["input_file"])
                 df = adapter.validate()
                 metrics = stage_data_engineering(df, output_dir, config)
-            elif stage_name == "layer1_stratified":
-                metrics = stage_layer1_stratified(output_dir, config)
-            elif stage_name == "layer2_causal":
-                metrics = stage_layer2_causal(output_dir, config)
-            elif stage_name == "layer3_esm2_encode":
-                metrics = stage_esm2_encode(output_dir, config)
-            elif stage_name == "layer3_counterfactual":
-                metrics = stage_layer3_counterfactual(output_dir, config)
-            elif stage_name == "layer5_synthesis":
-                metrics = stage_layer5_synthesis(output_dir, config)
             else:
-                metrics = {}
+                metrics = STAGE_MAP[stage_name](output_dir, config)
             tracker.complete_stage(stage_name, t0, metrics)
         except Exception as e:
             tracker.log_error(stage_name, e)
@@ -1339,11 +1405,14 @@ if __name__ == "__main__":
     parser.add_argument("--device", "-d", default="auto", choices=["auto","cuda","mps","cpu"])
     parser.add_argument("--batch-size", "-b", type=int, default=4, help="ESM-2批大小")
     parser.add_argument("--top-n", "-n", type=int, default=2000, help="反事实编辑处理序列数")
-    parser.add_argument("--esm2-models", type=str, default=None, help="ESM-2模型列表(逗号分隔), 如 esm2_t12_35M_UR50D,esm2_t30_150M_UR50D")
-    parser.add_argument("--esm2-fusion", type=str, default="concat", choices=["concat","average","pca_concat"], help="多模型嵌入融合策略")
-    parser.add_argument("--esm2-pca-dim", type=int, default=256, help="PCA降维目标维度(pca_concat策略)")
-    parser.add_argument("--cate-method", type=str, default="causal_forest", choices=["causal_forest","r_learner","plr"], help="CATE估计方法")
+    parser.add_argument("--esm2-models", type=str, default=None, help="ESM-2模型列表(逗号分隔)")
+    parser.add_argument("--esm2-fusion", type=str, default="concat", choices=["concat","average","pca_concat"])
+    parser.add_argument("--esm2-pca-dim", type=int, default=256, help="PCA降维目标维度")
+    parser.add_argument("--cate-method", type=str, default="causal_forest", choices=["causal_forest","r_learner","plr"])
     parser.add_argument("--subgroup-clusters", type=int, default=3, help="亚群聚类数")
+    parser.add_argument("--target", "-t", type=str, default="final_candidate",
+                        choices=["final_candidate", "rf2_passed"],
+                        help="优化目标: final_candidate 或 rf2_passed")
     args = parser.parse_args()
 
     config = DEFAULT_CONFIG.copy()
@@ -1358,6 +1427,7 @@ if __name__ == "__main__":
     config["esm2_pca_dim"] = args.esm2_pca_dim
     config["cate_method"] = args.cate_method
     config["subgroup_n_clusters"] = args.subgroup_clusters
+    config["optimization_target"] = args.target
     if args.esm2_models:
         config["esm2_models"] = [m.strip() for m in args.esm2_models.split(",")]
         config["esm2_model"] = config["esm2_models"][0]
