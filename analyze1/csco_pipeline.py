@@ -116,8 +116,9 @@ class ProgressTracker:
 # ═══════════════════════════════════════════════════════════════
 
 class DataAdapter:
-    def __init__(self, input_path):
+    def __init__(self, input_path, config=None):
         self.input_path = Path(input_path)
+        self.config = config or {}
         self.df = self._load_file()
         self._normalize_columns()
         self._fill_missing_columns()
@@ -185,12 +186,18 @@ class DataAdapter:
         if self._is_column_effectively_empty('funnel_stage'):
             self.df['funnel_stage'] = self.df.apply(self._infer_funnel_stage, axis=1)
 
-        if self._is_column_effectively_empty('rf2_passed_filter', treat_all_false_as_empty=True):
-            if 'rf2_pred_lddt' in self.df.columns and 'rf2_interaction_pae' in self.df.columns:
-                lddt_ok = self.df['rf2_pred_lddt'] >= 0.88
-                pae_ok = self.df['rf2_interaction_pae'] <= 10.0
-                rmsd_ok = self.df['rf2_framework_aligned_cdr_rmsd'].fillna(0) <= 2.0
-                self.df['rf2_passed_filter'] = lddt_ok & pae_ok & rmsd_ok
+        # 始终基于原始指标重新计算rf2_passed_filter（使用可配置阈值）
+        if 'rf2_pred_lddt' in self.df.columns and 'rf2_interaction_pae' in self.df.columns:
+            rf2_lddt_thresh = self.config.get('rf2_lddt_threshold', 0.86)
+            rf2_pae_thresh = self.config.get('rf2_pae_threshold', 10.0)
+            rf2_rmsd_thresh = self.config.get('rf2_rmsd_threshold', 2.5)
+            lddt_ok = self.df['rf2_pred_lddt'] >= rf2_lddt_thresh
+            pae_ok = self.df['rf2_interaction_pae'] <= rf2_pae_thresh
+            rmsd_ok = self.df['rf2_framework_aligned_cdr_rmsd'].fillna(0) <= rf2_rmsd_thresh
+            old_pass = self.df['rf2_passed_filter'].sum() if 'rf2_passed_filter' in self.df.columns else 0
+            self.df['rf2_passed_filter'] = lddt_ok & pae_ok & rmsd_ok
+            n_pass = self.df['rf2_passed_filter'].sum()
+            print(f"  RF2筛选(lddt≥{rf2_lddt_thresh}, pae≤{rf2_pae_thresh}, rmsd≤{rf2_rmsd_thresh}): {n_pass}/{len(self.df)} 通过 (原{old_pass}条)")
 
     def _is_column_effectively_empty(self, col_name, treat_all_false_as_empty=False):
         if col_name not in self.df.columns:
@@ -839,6 +846,11 @@ def _double_ml_cate(X, T, Y, n_folds=5, method="causal_forest", inner_n_jobs=1):
             if ss < 1e-8: continue
             cate_fold = Y_resid * T_resid / (T_resid**2 + 1e-6)
             cate_fold = np.clip(cate_fold, -50, 50)
+            # 逐折日志：Y残差、T残差、倾向得分、Robinson变换统计
+            print(f"      fold {fold_i+1}/{n_folds}: Y_resid range=[{Y_resid.min():.2f},{Y_resid.max():.2f}] mean={Y_resid.mean():.3f}, "
+                  f"T_resid range=[{T_resid.min():.2f},{T_resid.max():.2f}] mean={T_resid.mean():.3f}, "
+                  f"ps range=[{ps.min():.3f},{ps.max():.3f}] mean={ps.mean():.3f}, "
+                  f"Robinson_cate range=[{cate_fold.min():.2f},{cate_fold.max():.2f}] mean={cate_fold.mean():.3f}")
             hetero_model = GBR(n_estimators=50, max_depth=3, learning_rate=0.1, random_state=42)
             hetero_model.fit(X_te, cate_fold)
             cate[test_idx] = hetero_model.predict(X_te)
@@ -847,7 +859,11 @@ def _double_ml_cate(X, T, Y, n_folds=5, method="causal_forest", inner_n_jobs=1):
             fold_se = np.sqrt(np.sum(residuals**2) / (n-1) / max(ss, 1e-8))
             se_arr[test_idx] = fold_se
             t_stats[test_idx] = cate[test_idx] / fold_se if fold_se > 0 else 0
-        print(f"    R-learner: CATE range [{cate.min():.3f}, {cate.max():.3f}], mean={cate.mean():.3f}")
+            n_sig = int(np.sum(np.abs(t_stats[test_idx]) > 1.96))
+            print(f"      fold {fold_i+1}: hetero_CATE range=[{cate[test_idx].min():.2f},{cate[test_idx].max():.2f}] mean={cate[test_idx].mean():.3f}, "
+                  f"SE={fold_se:.4f}, significant={n_sig}/{len(test_idx)} ({n_sig/len(test_idx)*100:.1f}%)")
+        print(f"    R-learner: CATE range [{cate.min():.3f}, {cate.max():.3f}], mean={cate.mean():.3f}, "
+              f"pct_significant={np.mean(np.abs(t_stats)>1.96)*100:.1f}%")
         return cate, t_stats, se_arr
 
     import lightgbm as lgb
@@ -937,6 +953,9 @@ def _run_multi_treatment_cate(feat_df, X_all, Y_pae, out, cate_method):
 
     multi_treatment_results = []
     total = len(treatment_cols)
+    print(f"  === Multi-Treatment CATE 开始: {total}个treatment变量, 方法={cate_method} ===")
+    print(f"  混杂变量: {confounder_cols}")
+    print(f"  特征维度: X_all={X_all_f.shape[1]}, conf_data={conf_data.shape[1] if conf_data is not None else 0}")
     for i, t_col in enumerate(treatment_cols):
         t0 = time.time()
         try:
@@ -945,17 +964,35 @@ def _run_multi_treatment_cate(feat_df, X_all, Y_pae, out, cate_method):
                 print(f"  [{i+1}/{total}] {t_col}: 跳过(方差≈0)")
                 continue
             T_binary = (T_var > np.median(T_var)).astype(int) if len(np.unique(T_var)) > 5 else T_var.astype(int)
+            n_treat = int(T_binary.sum())
+            n_control = len(T_binary) - n_treat
+            treat_rate = n_treat / len(T_binary) * 100
+            print(f"  [{i+1}/{total}] {t_col}: treatment={n_treat}({treat_rate:.1f}%), control={n_control}, T_var range=[{T_var.min():.3f},{T_var.max():.3f}]")
             X_conf = np.hstack([X_all_f, conf_data]) if conf_data is not None else X_all_f.copy()
             cate_t, tstat_t, se_t = _double_ml_cate(X_conf, T_binary, Y_pae_f, method=cate_method, inner_n_jobs=1)
             elapsed = time.time() - t0
+            # 详细特征贡献度统计
+            n_pos = int(np.sum(cate_t > 0))
+            n_neg = int(np.sum(cate_t < 0))
+            n_sig = int(np.sum(np.abs(tstat_t) > 1.96))
+            n_sig_pos = int(np.sum((tstat_t > 1.96)))
+            n_sig_neg = int(np.sum((tstat_t < -1.96)))
             result = {
                 'treatment': t_col, 'cate_mean': float(np.mean(cate_t)),
                 'cate_std': float(np.std(cate_t)), 'cate_min': float(np.min(cate_t)),
-                'cate_max': float(np.max(cate_t)), 'n_significant': int(np.sum(np.abs(tstat_t) > 1.96)),
+                'cate_max': float(np.max(cate_t)), 'n_significant': n_sig,
                 'pct_significant': float(np.mean(np.abs(tstat_t) > 1.96) * 100),
+                'cate_median': float(np.median(cate_t)),
+                'cate_p25': float(np.percentile(cate_t, 25)),
+                'cate_p75': float(np.percentile(cate_t, 75)),
+                'n_positive': n_pos, 'n_negative': n_neg,
+                'n_sig_positive': n_sig_pos, 'n_sig_negative': n_sig_neg,
+                'se_mean': float(np.mean(se_t)),
+                'tstat_mean': float(np.mean(tstat_t)),
             }
             multi_treatment_results.append(result)
-            print(f"  [{i+1}/{total}] {t_col}: cate_mean={result['cate_mean']:.3f}, {elapsed:.1f}s")
+            print(f"  [{i+1}/{total}] {t_col}: cate_mean={result['cate_mean']:.3f} [{result['cate_p25']:.3f},{result['cate_p75']:.3f}], "
+                  f"pos={n_pos} neg={n_neg} sig+={n_sig_pos} sig-={n_sig_neg}, SE={result['se_mean']:.4f}, {elapsed:.1f}s")
         except Exception as e:
             elapsed = time.time() - t0
             print(f"  [{i+1}/{total}] {t_col}: 失败({e}), {elapsed:.1f}s")
@@ -1105,26 +1142,38 @@ def stage_layer5_synthesis(output_dir, config):
         total=(target_col, 'count'), rf2_pass=('rf2_passed', 'sum'), final_cand=('final_candidate', 'sum')
     ).reset_index()
     len_pass['pass_rate'] = len_pass['rf2_pass'] / len_pass['total']
-    valid_lengths = len_pass[len_pass['pass_rate'] > 0.10]['cdr3_len'].tolist()
+    valid_lengths = len_pass[len_pass['pass_rate'] > 0.05]['cdr3_len'].tolist()
 
     fc_rate_by_len = feat_df.groupby('cdr3_len')[target_col].mean()
-    dead_zone_lengths = [l for l in valid_lengths if fc_rate_by_len.get(l, 0) < 0.001]
+    dead_zone_lengths = [l for l in valid_lengths if fc_rate_by_len.get(l, 0) < 0.0005]
     if dead_zone_lengths:
         print(f"  ⚠ 移除FC死区长度(FC率≈0): {dead_zone_lengths}")
         valid_lengths = [l for l in valid_lengths if l not in dead_zone_lengths]
 
     first_res = feat_df.groupby('first_residue').agg(total=(target_col, 'count'), rf2_pass=('rf2_passed', 'sum')).reset_index()
     first_res['rate'] = first_res['rf2_pass'] / first_res['total']
-    first_whitelist = first_res[first_res['rate'] > 0.40]['first_residue'].tolist()
+    first_whitelist = first_res[first_res['rate'] > 0.70]['first_residue'].tolist()
+    # 打印所有首残基的通过率排名
+    print(f"  首残基RF2通过率排名(rate>0.70入选白名单):")
+    for _, r in first_res.sort_values('rate', ascending=False).iterrows():
+        mark = '✓' if r['rate'] > 0.70 else '✗'
+        print(f"    {mark} {r['first_residue']}: {r['rate']:.1%} ({int(r['rf2_pass'])}/{int(r['total'])})")
+    # 排除FC率为0的首残基（数据驱动：V等RF2通过率高但FC=0）
+    fc_rate_by_first = feat_df.groupby('first_residue')[target_col].mean()
+    zero_fc_first = [aa for aa in first_whitelist if fc_rate_by_first.get(aa, 0) == 0]
+    if zero_fc_first:
+        print(f"  ⚠ 移除FC率为0的首残基: {zero_fc_first} (RF2通过率高但从未成为最终候选)")
+        first_whitelist = [aa for aa in first_whitelist if aa not in zero_fc_first]
+    print(f"  首残基白名单: {first_whitelist}")
 
     last_res = feat_df.groupby('last_residue').agg(total=(target_col, 'count'), rf2_pass=('rf2_passed', 'sum')).reset_index()
     last_res['rate'] = last_res['rf2_pass'] / last_res['total']
-    last_whitelist = last_res[last_res['rate'] > 0.15]['last_residue'].tolist()
+    last_whitelist = last_res[last_res['rate'] > 0.08]['last_residue'].tolist()
 
-    best_aromatic = _search_soft_threshold(feat_df, 'aromatic_ratio', '>=', [0.15, 0.20, 0.25], target_col, 0.15, 0.20)
-    best_glycine = _search_soft_threshold(feat_df, 'glycine_ratio', '<=', [0.20, 0.15, 0.12], target_col, 0.12, 0.20)
-    best_serine = _search_soft_threshold(feat_df, 'serine_ratio', '<=', [0.20, 0.15, 0.10], target_col, 0.15, 0.15)
-    best_hydrophobic = _search_soft_threshold(feat_df, 'hydrophobic_ratio', '>=', [0.40, 0.45, 0.50, 0.55], target_col, 0.10, 0.45)
+    best_aromatic = _search_soft_threshold(feat_df, 'aromatic_ratio', '>=', [0.10, 0.15, 0.20, 0.25], target_col, 0.08, 0.15)
+    best_glycine = _search_soft_threshold(feat_df, 'glycine_ratio', '<=', [0.25, 0.20, 0.15, 0.12], target_col, 0.08, 0.20)
+    best_serine = _search_soft_threshold(feat_df, 'serine_ratio', '<=', [0.25, 0.20, 0.15, 0.10], target_col, 0.08, 0.15)
+    best_hydrophobic = _search_soft_threshold(feat_df, 'hydrophobic_ratio', '>=', [0.35, 0.40, 0.45, 0.50, 0.55], target_col, 0.06, 0.40)
 
     anti_patterns = _detect_anti_patterns(feat_df, target_col)
 
@@ -1175,21 +1224,21 @@ def stage_layer5_synthesis(output_dir, config):
             l_prefs['aromatic_min_ratio'] = best_aromatic
 
         gly_ate = strat_ate_map.get((length, 'glycine_ratio'))
-        if gly_ate is not None and gly_ate > 2.0:
+        if gly_ate is not None and gly_ate > 3.0:
             l_prefs['glycine_max_ratio'] = min(best_glycine, 0.15)
         else:
             l_prefs['glycine_max_ratio'] = best_glycine
 
         ser_ate = strat_ate_map.get((length, 'serine_ratio'))
-        if ser_ate is not None and ser_ate < -2.0:
+        if ser_ate is not None and ser_ate < -3.0:
             l_prefs['serine_max_ratio'] = 0.4
-        elif ser_ate is not None and ser_ate > 2.0:
+        elif ser_ate is not None and ser_ate > 3.0:
             l_prefs['serine_max_ratio'] = min(best_serine, 0.12)
         else:
             l_prefs['serine_max_ratio'] = best_serine
 
         pro_ate = strat_ate_map.get((length, 'proline_count'))
-        if pro_ate is not None and pro_ate < -2.0:
+        if pro_ate is not None and pro_ate < -3.0:
             l_prefs['proline_max_count'] = 3
         elif pro_ate is not None and pro_ate < 0:
             l_prefs['proline_max_count'] = 2
@@ -1208,7 +1257,7 @@ def stage_layer5_synthesis(output_dir, config):
             l_prefs['hydrophobic_min_ratio'] = best_hydrophobic
 
         first_aro_ate = strat_ate_map.get((length, 'first_is_aromatic'))
-        if first_aro_ate is not None and first_aro_ate > -0.5:
+        if first_aro_ate is not None and first_aro_ate > -1.0:
             l_prefs['first_aromatic_optional'] = True
 
         length_specific_prefs[str(length)] = l_prefs
@@ -1285,7 +1334,7 @@ def _detect_anti_patterns(feat_df, target_col):
         if col in feat_df.columns and feat_df[col].sum() > 0:
             with_rate = feat_df.loc[feat_df[col] == 1, target_col].mean()
             without_rate = feat_df.loc[feat_df[col] == 0, target_col].mean()
-            if without_rate > 0 and with_rate < without_rate * 0.5:
+            if without_rate > 0 and with_rate < without_rate * 0.3:
                 anti_patterns.append(pattern)
     return anti_patterns
 
@@ -1374,7 +1423,7 @@ def run_pipeline(config):
         t0 = tracker.start_stage(stage_name)
         try:
             if stage_name == "data_engineering":
-                adapter = DataAdapter(config["input_file"])
+                adapter = DataAdapter(config["input_file"], config=config)
                 df = adapter.validate()
                 metrics = stage_data_engineering(df, output_dir, config)
             else:

@@ -626,8 +626,7 @@ rsync -avP REDACTED_USER@REDACTED_IP:~/CSC-O/output/ \
   /path/to/CSC-O/analyze1/output_server/
 
 # VPN 连接（必须加 MTU）
-sudo openconnect --mtu 1228 REDACTED_VPN -u REDACTED_VPN_USER \
-  --useragent "AnyConnect Windows 4.10.07073" --os=win -b
+sudo openconnect --mtu 1228 <VPN_ADDRESS> -u <VPN_USER> -b
 ```
 
 ### 附录 C：依赖版本锁定

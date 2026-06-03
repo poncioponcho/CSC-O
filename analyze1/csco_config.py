@@ -44,6 +44,14 @@ DEFAULT_CONFIG = {
     "counterfactual_top_n": 2000,
     "tsne_sample_size": 3000,
     "optimization_target": "final_candidate",
+    "rf2_lddt_threshold": 0.86,
+    "rf2_pae_threshold": 10.0,
+    "rf2_rmsd_threshold": 2.5,
+    "screener_top_n": 500,
+    "screener_min_edit_distance": 2,
+    "screener_prob_threshold": 0.2,
+    "generator_n_samples": 20000,
+    "generator_min_soft_score": 1.5,
 }
 
 STAGE_NAMES = [

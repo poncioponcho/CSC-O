@@ -14,21 +14,41 @@ def load_strategy(strategy_path):
         return json.load(f)
 
 
-def check_hard_constraints(cdr3, strategy, length_specific_prefs=None):
+def check_hard_constraints(cdr3, strategy, length_specific_prefs=None, verbose=False):
     hc = strategy['hard_constraints']
     features = extract_cdr3_features(cdr3)
     if features['cdr3_len'] not in hc.get('cdr3_length_allowed', [5, 6, 7]):
+        if verbose:
+            print(f"    [白名单日志] 序列={cdr3} | 长度={features['cdr3_len']} | 拒绝: 长度不在允许列表{hc.get('cdr3_length_allowed', [])}中")
         return False, "length_not_allowed"
     lsp = length_specific_prefs or strategy.get('length_specific_preferences', {}).get(str(features['cdr3_len']), {})
     if hc.get('cdr3_min_aromatic_first') and not lsp.get('first_aromatic_optional'):
         if not features['first_is_aromatic']:
+            if verbose:
+                print(f"    [白名单日志] 序列={cdr3} | 首残基={cdr3[0]} | 拒绝: 首残基非芳香族(要求first_is_aromatic)")
             return False, "first_not_aromatic"
-    if hc.get('cdr3_first_residue_whitelist') and cdr3[0] not in hc['cdr3_first_residue_whitelist']:
+    first_wl = hc.get('cdr3_first_residue_whitelist', None)
+    if first_wl and cdr3[0] not in first_wl:
+        if verbose:
+            print(f"    [白名单日志] 序列={cdr3} | 首残基={cdr3[0]} | 拒绝: 首残基不在白名单{first_wl}中")
         return False, "first_not_whitelisted"
-    if hc.get('cdr3_last_residue_whitelist') and cdr3[-1] not in hc['cdr3_last_residue_whitelist']:
+    elif first_wl and cdr3[0] in first_wl:
+        if verbose:
+            print(f"    [白名单日志] 序列={cdr3} | 首残基={cdr3[0]} | 通过: 首残基在白名单{first_wl}中")
+    last_wl = hc.get('cdr3_last_residue_whitelist', None)
+    if last_wl and cdr3[-1] not in last_wl:
+        if verbose:
+            print(f"    [白名单日志] 序列={cdr3} | 尾残基={cdr3[-1]} | 拒绝: 尾残基不在白名单{last_wl}中")
         return False, "last_not_whitelisted"
+    elif last_wl and cdr3[-1] in last_wl:
+        if verbose:
+            print(f"    [白名单日志] 序列={cdr3} | 尾残基={cdr3[-1]} | 通过: 尾残基在白名单{last_wl}中")
     if features['positive_count'] < hc.get('cdr3_min_positive_count', 0):
+        if verbose:
+            print(f"    [白名单日志] 序列={cdr3} | positive_count={features['positive_count']} | 拒绝: 正电荷残基不足(要求>={hc.get('cdr3_min_positive_count', 0)})")
         return False, "insufficient_positive"
+    if verbose:
+        print(f"    [白名单日志] 序列={cdr3} | 全部硬约束通过 ✓")
     return True, None
 
 
@@ -59,7 +79,7 @@ def score_soft_preferences(cdr3, strategy):
     return score
 
 
-def generate_cdr3(strategy, length, n_samples, rng):
+def generate_cdr3(strategy, length, n_samples, rng, verbose=False, filter_log=None):
     hc = strategy['hard_constraints']
     sp = strategy.get('soft_preferences', {})
     lsp = strategy.get('length_specific_preferences', {})
@@ -68,12 +88,15 @@ def generate_cdr3(strategy, length, n_samples, rng):
 
     first_whitelist = hc.get('cdr3_first_residue_whitelist', AMINO_ACIDS)
     last_whitelist = hc.get('cdr3_last_residue_whitelist', AMINO_ACIDS)
+    if verbose:
+        print(f"  [生成日志] 长度={length} | 首残基白名单={first_whitelist} | 尾残基白名单={last_whitelist}")
     preferred_lengths = hc.get('cdr3_length_preferred', [length])
     templates = strategy.get('success_templates', {})
     len_key = f'length_{length}'
     template_list = templates.get(len_key, [])
 
     generated = []
+    rejected_reasons = Counter()
     attempts = 0
     max_attempts = n_samples * 50
 
@@ -87,6 +110,8 @@ def generate_cdr3(strategy, length, n_samples, rng):
         else:
             first = rng.choice(first_whitelist)
             last = rng.choice(last_whitelist)
+            if verbose and attempts <= 5:
+                print(f"  [生成日志] 尝试#{attempts}: 从白名单{first_whitelist}中选取首残基={first}, 从白名单{last_whitelist}中选取尾残基={last}")
             middle_len = length - 2
             if middle_len > 0:
                 middle = []
@@ -116,14 +141,31 @@ def generate_cdr3(strategy, length, n_samples, rng):
                 cdr3 = first + last
 
         if len(cdr3) != length:
+            rejected_reasons['wrong_length'] += 1
+            if filter_log is not None:
+                filter_log.append({'cdr3': cdr3, 'length': len(cdr3), 'target_length': length,
+                                   'reject_reason': 'wrong_length', 'reject_detail': f'生成长度{len(cdr3)}!=目标长度{length}'})
             continue
 
-        ok, reason = check_hard_constraints(cdr3, strategy)
+        ok, reason = check_hard_constraints(cdr3, strategy, verbose=verbose and attempts <= 10)
         if not ok:
+            rejected_reasons[reason] += 1
+            if filter_log is not None:
+                features = extract_cdr3_features(cdr3)
+                filter_log.append({'cdr3': cdr3, 'length': features['cdr3_len'],
+                                   'first_residue': cdr3[0], 'last_residue': cdr3[-1],
+                                   'reject_reason': reason,
+                                   'reject_detail': _reject_detail(reason, features, hc)})
             continue
 
         has_anti, pattern = check_anti_patterns(cdr3, strategy)
         if has_anti:
+            rejected_reasons[f'anti_pattern_{pattern}'] += 1
+            if filter_log is not None:
+                filter_log.append({'cdr3': cdr3, 'length': len(cdr3),
+                                   'first_residue': cdr3[0], 'last_residue': cdr3[-1],
+                                   'reject_reason': f'anti_pattern_{pattern}',
+                                   'reject_detail': f'包含反模式"{pattern}"'})
             continue
 
         soft_score = score_soft_preferences(cdr3, strategy)
@@ -134,7 +176,20 @@ def generate_cdr3(strategy, length, n_samples, rng):
             **{k: v for k, v in features.items() if isinstance(v, (int, float, bool))},
         })
 
+    if verbose:
+        print(f"  [生成日志] 长度={length}: 尝试{attempts}次, 生成{len(generated)}条, 拒绝原因分布={dict(rejected_reasons.most_common(5))}")
     return generated
+
+
+def _reject_detail(reason, features, hc):
+    detail_map = {
+        'length_not_allowed': f"长度{features['cdr3_len']}不在允许列表{hc.get('cdr3_length_allowed', [])}中",
+        'first_not_aromatic': f"首残基{features['first_residue']}非芳香族(要求first_is_aromatic=True)",
+        'first_not_whitelisted': f"首残基{features['first_residue']}不在白名单{hc.get('cdr3_first_residue_whitelist', [])}中",
+        'last_not_whitelisted': f"尾残基{features['last_residue']}不在白名单{hc.get('cdr3_last_residue_whitelist', [])}中",
+        'insufficient_positive': f"正电荷残基数{features['positive_count']}<最低要求{hc.get('cdr3_min_positive_count', 0)}",
+    }
+    return detail_map.get(reason, reason)
 
 
 def generate_vh_framework(cdr3, framework_templates, rng):
@@ -150,6 +205,8 @@ def main():
     parser.add_argument("--n-samples", type=int, default=10000, help="number of sequences to generate")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--min-soft-score", type=float, default=2.0, help="minimum soft preference score")
+    parser.add_argument("--verbose", action="store_true", help="enable detailed whitelist matching logs")
+    parser.add_argument("--filter-log", default=None, help="path to save filtered sequence log (CSV)")
     args = parser.parse_args()
 
     rng = random.Random(args.seed)
@@ -164,16 +221,20 @@ def main():
     print(f"CSC-O 序列生成器")
     print(f"  策略: {strategy.get('strategy_name', 'CSC-O_v1')}")
     print(f"  允许长度: {allowed_lengths}")
+    print(f"  首残基白名单: {hc.get('cdr3_first_residue_whitelist', '无限制(全部20种氨基酸)')}")
+    print(f"  尾残基白名单: {hc.get('cdr3_last_residue_whitelist', '无限制(全部20种氨基酸)')}")
+    print(f"  首残基芳香族要求: {hc.get('cdr3_min_aromatic_first', False)}")
     print(f"  目标生成数: {args.n_samples}")
 
     all_generated = []
+    filter_log = [] if args.filter_log else None
     if length_weights_raw:
         weight_sum = sum(length_weights_raw.get(str(l), 0.0) for l in allowed_lengths)
         if weight_sum > 0:
             for length in allowed_lengths:
                 w = length_weights_raw.get(str(length), 0.0)
                 n_target = max(int(args.n_samples * w / weight_sum), 100)
-                seqs = generate_cdr3(strategy, length, n_target, rng)
+                seqs = generate_cdr3(strategy, length, n_target, rng, verbose=args.verbose, filter_log=filter_log)
                 all_generated.extend(seqs)
                 print(f"  长度 {length}: 生成 {len(seqs)} 条 (权重={w:.3f}, 目标 {n_target})")
         else:
@@ -182,7 +243,7 @@ def main():
         n_per_length = args.n_samples // len(allowed_lengths)
         for length in allowed_lengths:
             n_target = n_per_length * 2 if length in preferred_lengths else n_per_length
-            seqs = generate_cdr3(strategy, length, n_target, rng)
+            seqs = generate_cdr3(strategy, length, n_target, rng, verbose=args.verbose, filter_log=filter_log)
             all_generated.extend(seqs)
             print(f"  长度 {length}: 生成 {len(seqs)} 条 (目标 {n_target})")
 
@@ -218,6 +279,15 @@ def main():
     print(f"  输出: {out_path} ({len(df)} 条)")
     print(f"  CDR3长度分布: {dict(Counter(df['cdr3_len']))}")
     print(f"  平均软偏好得分: {df['soft_score'].mean():.2f}")
+
+    if filter_log is not None and len(filter_log) > 0:
+        log_df = pd.DataFrame(filter_log)
+        log_path = Path(args.filter_log)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_df.to_csv(log_path, index=False)
+        print(f"  过滤日志: {log_path} ({len(log_df)} 条被过滤记录)")
+        reason_counts = log_df['reject_reason'].value_counts()
+        print(f"  过滤原因分布: {dict(reason_counts)}")
 
 
 if __name__ == "__main__":

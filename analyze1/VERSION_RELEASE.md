@@ -16,19 +16,19 @@
 ## 三、脱敏处理范围
 详细列出所有脱敏操作：
 
-| 文件 | 脱敏内容 | 替换为 |
-|------|---------|--------|
-| ENGINEERING_ANALYSIS_REPORT.md | 服务器IP 49.52.29.0 | REDACTED_IP |
-| ENGINEERING_ANALYSIS_REPORT.md | 用户名 test@49.52.29.0 | REDACTED_USER@REDACTED_IP |
-| ENGINEERING_ANALYSIS_REPORT.md | 主机名 sugon-W780-G20 | REDACTED_HOSTNAME |
+| 文件 | 脱敏内容类型 | 替换为 |
+|------|-------------|--------|
+| ENGINEERING_ANALYSIS_REPORT.md | 服务器IP | REDACTED_IP |
+| ENGINEERING_ANALYSIS_REPORT.md | 用户名+IP | REDACTED_USER@REDACTED_IP |
+| ENGINEERING_ANALYSIS_REPORT.md | 主机名 | REDACTED_HOSTNAME |
 | PLAN_AB_IMPLEMENTATION.md | 服务器IP和用户名 | REDACTED_IP / REDACTED_USER@REDACTED_IP |
-| PROJECT_PROGRESS_AND_PLAN.md | GitHub用户名 poncioponcho | REDACTED_USER |
-| PROJECT_PROGRESS_AND_PLAN.md | 主机名 Sugon-W780-G20 | REDACTED_HOSTNAME |
-| vpn_diagnose.sh | IP 10.105.212.210 | REDACTED_IP |
-| tools/ssh_auto_attach.sh | 默认用户名 test | REDACTED_USER |
-| tools/check_server_status.sh | 默认用户名 test | REDACTED_USER |
-| tools/vpn_watchdog.sh | 默认用户名 test | REDACTED_USER |
-| tools/README.md | 默认用户名 test | REDACTED_USER |
+| PROJECT_PROGRESS_AND_PLAN.md | GitHub用户名 | REDACTED_USER |
+| PROJECT_PROGRESS_AND_PLAN.md | 主机名 | REDACTED_HOSTNAME |
+| vpn_diagnose.sh | 内网IP | REDACTED_IP |
+| tools/ssh_auto_attach.sh | 默认用户名 | REDACTED_USER |
+| tools/check_server_status.sh | 默认用户名 | REDACTED_USER |
+| tools/vpn_watchdog.sh | 默认用户名 | REDACTED_USER |
+| tools/README.md | 默认用户名 | REDACTED_USER |
 | .gitignore | 新增排除 output_server*/, *.csv, *.xlsx | - |
 
 说明：含明文密码的 服务器配置记录.md 已被 .gitignore 排除，不会提交到仓库。
