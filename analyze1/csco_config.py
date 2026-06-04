@@ -52,6 +52,10 @@ DEFAULT_CONFIG = {
     "screener_prob_threshold": 0.2,
     "generator_n_samples": 20000,
     "generator_min_soft_score": 1.5,
+    # v3.0 Funnel-Aware配置
+    "available_stages": ["rf2", "final"],
+    "mediation_method": "decomposition",
+    "funnel_treatment_cols": ["first_is_aromatic", "cdr3_length_bin", "glycine_ratio_bin", "serine_ratio_bin"],
 }
 
 STAGE_NAMES = [
