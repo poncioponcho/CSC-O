@@ -62,6 +62,7 @@ STAGE_NAMES = [
     "data_engineering",
     "layer1_stratified",
     "layer2_causal",
+    "multistage_causal",
     "layer3_esm2_encode",
     "layer3_counterfactual",
     "layer5_synthesis",

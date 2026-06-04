@@ -498,6 +498,79 @@ def stage_layer2_causal(output_dir, config):
 
     return {"n_ate_results": len(ate_results), "n_stratified_results": len(stratified_results)}
 
+def stage_multistage_causal(output_dir, config):
+    """v3.0 多阶段中介模型 + 多状态生存模型"""
+    from csco_multistage_causal import MultiStageMediationModel
+    from csco_multistate_survival import MultiStateSurvivalModel
+    from csco_funnel_aware_strategy import FunnelAwareStrategy
+
+    out = Path(output_dir)
+    feat_df = pd.read_csv(out / "feature_matrix.csv")
+
+    # 加载ESM-2嵌入
+    emb_path = out / "esm2_embeddings.npy"
+    if not emb_path.exists():
+        return {"status": "skipped", "reason": "ESM-2 embeddings not found"}
+
+    embeddings = np.load(emb_path)
+
+    # 确保final_candidate列存在
+    if 'final_candidate' not in feat_df.columns:
+        feat_df['final_candidate'] = False
+
+    # Phase 1: 多阶段中介模型
+    mediation_model = MultiStageMediationModel(
+        available_stages=config.get('available_stages', ['rf2', 'final']),
+        method=config.get('mediation_method', 'decomposition'),
+        verbose=config.get('verbose', True),
+    )
+
+    treatment_cols = config.get('funnel_treatment_cols',
+                                ['first_is_aromatic', 'cdr3_length_bin',
+                                 'glycine_ratio_bin', 'serine_ratio_bin'])
+
+    mediation_results = mediation_model.fit(
+        df=feat_df,
+        embeddings=embeddings,
+        treatment_cols=treatment_cols,
+        confounder_cols=['backbone_id'],
+    )
+
+    mediation_model.save_results(out / "mediation_effects.csv")
+
+    # Phase 2: 多状态生存模型
+    survival_model = MultiStateSurvivalModel(
+        available_stages=config.get('available_stages', ['rf2', 'final']),
+        verbose=config.get('verbose', True),
+    )
+
+    survival_results = survival_model.fit(
+        df=feat_df,
+        treatment_cols=treatment_cols,
+        confounder_cols=['backbone_id'],
+    )
+
+    survival_model.save_results(out / "multistate_hazard_ratios.csv")
+
+    # 交叉验证
+    cv_df = survival_model.cross_validate_with_mediation(mediation_results)
+    cv_df.to_csv(out / "cross_validation_mediation_survival.csv", index=False)
+
+    # 生成v3.0策略
+    strategy = FunnelAwareStrategy(verbose=config.get('verbose', True))
+    v3_strategy = strategy.save_v3_strategy(
+        str(out / "design_strategy_v3.0.json"),
+    )
+
+    n_consistent = cv_df['direction_consistent'].sum() if len(cv_df) > 0 else 0
+
+    return {
+        "n_mediation_results": len(mediation_results),
+        "n_survival_results": len(survival_results),
+        "n_direction_consistent": int(n_consistent),
+        "n_total_treatments": len(treatment_cols),
+    }
+
 def _pc_algorithm(data, alpha=0.01, domain_constraints=None):
     from scipy import stats
     from itertools import combinations
@@ -1404,6 +1477,7 @@ STAGE_MAP = {
     "data_engineering":       stage_data_engineering,
     "layer1_stratified":      stage_layer1_stratified,
     "layer2_causal":          stage_layer2_causal,
+    "multistage_causal":      stage_multistage_causal,
     "layer3_esm2_encode":     stage_esm2_encode,
     "layer3_counterfactual":  stage_layer3_counterfactual,
     "layer5_synthesis":       stage_layer5_synthesis,
