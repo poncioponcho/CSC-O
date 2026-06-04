@@ -183,9 +183,13 @@ class FunnelAwareStrategy:
             if set(current_whitelist) <= {'F', 'W', 'Y'}:
                 # 当前白名单仅含芳香族, 扩展
                 # 添加在Final阶段可能表现好的残基: V(疏水), A(小), D(酸性), T(极性)
-                hc['cdr3_first_residue_whitelist'] = ['F', 'W', 'Y', 'V', 'A', 'D', 'T']
+                hc['cdr3_first_residue_whitelist'] = ['F', 'W', 'Y', 'V', 'A', 'D', 'T', 'G']
                 if self.verbose:
                     print(f"  [策略变更] 首残基白名单: {current_whitelist} → {hc['cdr3_first_residue_whitelist']}")
+                
+                # G首残基条件约束
+                hc['first_G_condition'] = 'glycine_ratio <= 0.15'
+                hc['first_G_penalty_if_violation'] = 1.0
         
         # === 关键修改2: 添加阶段感知约束 ===
         base['stage_aware_constraints'] = {}
@@ -239,6 +243,22 @@ class FunnelAwareStrategy:
             final_score += self.constraints['first_is_aromatic']['final_weight']
             stage_deltas['first_aromatic_rf2'] = self.constraints['first_is_aromatic']['rf2_weight']
             stage_deltas['first_aromatic_final'] = self.constraints['first_is_aromatic']['final_weight']
+        
+        # === G首残基条件约束 ===
+        if cdr3[0] == 'G':
+            # G首残基在FC正样本中占26.2%, 但甘氨酸整体是RF2风险
+            if features['glycine_ratio'] <= 0.15:
+                # 条件满足: G首残基+低甘氨酸比例 → Final有利
+                rf2_score += 0.5   # 微弱RF2正效应(低甘氨酸补偿)
+                final_score += 1.0  # Final强正效应(匹配FC正样本模式)
+                stage_deltas['first_G_rf2'] = 0.5
+                stage_deltas['first_G_final'] = 1.0
+            else:
+                # 条件违反: G首残基+高甘氨酸比例 → RF2风险
+                rf2_score -= 1.0   # RF2惩罚
+                final_score += 0.3  # Final仍微弱正效应
+                stage_deltas['first_G_rf2'] = -1.0
+                stage_deltas['first_G_final'] = 0.3
         
         # === cdr3_length ===
         length_constraint = self.constraints['cdr3_length']

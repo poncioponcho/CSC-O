@@ -1,0 +1,228 @@
+{
+  "strategy_name": "CSC-O_v3.1_funnel_aware",
+  "description": "Funnel-aware: 首残基芳香族降级为软偏好, 条件性加入G(需glycine_ratio≤0.15), 阶段权重平衡RF2/Final",
+  "version": "3.1",
+  "date": "2026-06-03",
+  "data_source": "Q02223_first50_all_sequences.csv",
+  "data_size": 10572,
+  "optimization_target": "final_candidate",
+  "hard_constraints": {
+    "cdr3_length_allowed": [
+      6,
+      7
+    ],
+    "cdr3_length_preferred": [
+      6,
+      7
+    ],
+    "cdr3_first_residue_whitelist": [
+      "F",
+      "W",
+      "Y",
+      "V",
+      "A",
+      "D",
+      "T",
+      "G"
+    ],
+    "cdr3_last_residue_whitelist": [
+      "Y",
+      "A",
+      "H",
+      "N",
+      "D",
+      "W",
+      "S",
+      "T",
+      "V",
+      "F"
+    ],
+    "cdr3_min_positive_count": 0,
+    "cdr3_min_aromatic_first": false
+  },
+  "length_generation_weights": {
+    "6": 0.64545,
+    "7": 0.7247
+  },
+  "soft_preferences": {
+    "aromatic_min_ratio": 0.08,
+    "glycine_max_ratio": 0.15,
+    "serine_max_ratio": 0.25,
+    "proline_max_count": 1,
+    "hydrophobic_min_ratio": 0.3,
+    "first_aromatic_bonus": 0.5,
+    "first_non_aromatic_final_bonus": 0.3,
+    "first_G_condition": "glycine_ratio <= 0.15",
+    "first_G_penalty_if_violation": 1.0
+  },
+  "length_specific_preferences": {
+    "6": {
+      "aromatic_min_ratio": 0.08,
+      "glycine_max_ratio": 0.15,
+      "serine_max_ratio": 0.25,
+      "proline_max_count": 2,
+      "hydrophobic_min_ratio": 0.3
+    },
+    "7": {
+      "aromatic_min_ratio": 0.08,
+      "glycine_max_ratio": 0.15,
+      "serine_max_ratio": 0.25,
+      "proline_max_count": 1,
+      "hydrophobic_min_ratio": 0.3
+    }
+  },
+  "anti_patterns": [
+    "GGG",
+    "SSS",
+    "LL"
+  ],
+  "success_templates": {
+    "length_6": [
+      "FKDSPY",
+      "WTDKEY",
+      "YKNALY",
+      "WYDEQY",
+      "WHEAPY",
+      "WYDSPY",
+      "WHDAPY",
+      "WHDSQS"
+    ],
+    "length_7": [
+      "YYNGQWY",
+      "FHTSPPA",
+      "WVGDTPA",
+      "YKETPPA",
+      "FAGDETA",
+      "YVNGQLY",
+      "FGGDTTA",
+      "FQGNEDA",
+      "FVGDTVY"
+    ]
+  },
+  "salvage_edits": [
+    {
+      "pattern": "Pos9 Y->E",
+      "count": 273,
+      "mean_pae_change": -1.7
+    },
+    {
+      "pattern": "Pos6 S->R",
+      "count": 205,
+      "mean_pae_change": -1.16
+    },
+    {
+      "pattern": "Pos6 Y->R",
+      "count": 181,
+      "mean_pae_change": -1.16
+    },
+    {
+      "pattern": "Pos6 P->R",
+      "count": 179,
+      "mean_pae_change": -1.16
+    },
+    {
+      "pattern": "Pos6 F->R",
+      "count": 154,
+      "mean_pae_change": -1.16
+    },
+    {
+      "pattern": "Pos6 T->R",
+      "count": 136,
+      "mean_pae_change": -1.16
+    },
+    {
+      "pattern": "Pos6 E->R",
+      "count": 133,
+      "mean_pae_change": -1.16
+    },
+    {
+      "pattern": "Pos9 Q->E",
+      "count": 124,
+      "mean_pae_change": -1.7
+    },
+    {
+      "pattern": "Pos6 Q->R",
+      "count": 116,
+      "mean_pae_change": -1.16
+    },
+    {
+      "pattern": "Pos6 A->R",
+      "count": 96,
+      "mean_pae_change": -1.16
+    },
+    {
+      "pattern": "Pos9 S->E",
+      "count": 83,
+      "mean_pae_change": -1.7
+    },
+    {
+      "pattern": "Pos6 N->R",
+      "count": 82,
+      "mean_pae_change": -1.16
+    },
+    {
+      "pattern": "Pos9 F->E",
+      "count": 82,
+      "mean_pae_change": -1.7
+    },
+    {
+      "pattern": "Pos9 D->E",
+      "count": 76,
+      "mean_pae_change": -1.7
+    },
+    {
+      "pattern": "Pos6 D->R",
+      "count": 71,
+      "mean_pae_change": -1.16
+    }
+  ],
+  "truncation_rule": {
+    "if_cdr3_length_ge_10": "truncate_to_7",
+    "evidence_count": 883
+  },
+  "cox_hazard_ratios": {
+    "glycine_ratio": 3.83,
+    "aromatic_ratio": 2.07,
+    "serine_ratio": 1.74,
+    "positive_ratio": 1.31,
+    "hydrophobic_ratio": 1.2,
+    "cdr3_len": 1.14
+  },
+  "ate_estimates": {
+    "cdr3_len": 0.91,
+    "aromatic_ratio": 5.03,
+    "glycine_ratio": 5.41,
+    "first_is_aromatic": -4.69,
+    "last_is_YH": 1.3
+  },
+  "stage_aware_constraints": {
+    "first_is_aromatic": {
+      "rf2_weight": 2.0,
+      "final_weight": -1.5,
+      "hard_constraint": false,
+      "note": "RF2保护(HR=0.069)但Final反转(HR=3.676, p=1e-9), 设为软偏好"
+    },
+    "cdr3_length": {
+      "rf2_weight": 1.0,
+      "final_weight": 0.5,
+      "hard_constraint": true,
+      "note": "RF2保护(HR=0.096)但Final反转(HR=1.928, p=0.007), 长度6可能更优"
+    },
+    "glycine_ratio": {
+      "rf2_weight": -1.5,
+      "final_weight": 0.3,
+      "hard_constraint": false,
+      "note": "RF2风险(HR=1.390), Final不显著(HR=0.863, p=0.546), 仍应限制"
+    },
+    "serine_ratio": {
+      "rf2_weight": -2.0,
+      "final_weight": 0.2,
+      "hard_constraint": false,
+      "note": "RF2强风险(HR=2.444), Final不显著(HR=0.906, p=0.738), 仍应限制"
+    }
+  },
+  "funnel_stage_weights": {
+    "rf2": 0.4,
+    "final": 0.6
+  }
+}
