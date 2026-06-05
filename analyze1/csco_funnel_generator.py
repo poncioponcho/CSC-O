@@ -245,6 +245,13 @@ class FunnelAwareGenerator:
                 avg_p_final = np.mean([s.estimated_p_final for s in selected])
                 print(f"  平均P(final): {avg_p_final:.6f}")
                 print(f"  耗时: {elapsed:.1f}s")
+                # 详细日志: 每20条打印P(final)和多样性
+                for i, s in enumerate(selected):
+                    if (i + 1) % 20 == 0:
+                        batch = selected[:i + 1]
+                        avg_pf = np.mean([x.estimated_p_final for x in batch])
+                        avg_div = np.mean([x.diversity_score for x in batch])
+                        print(f"  Step {i+1:3d}: P(final)_avg={avg_pf:.6f}, diversity_avg={avg_div:.2f}")
 
         return selected
 

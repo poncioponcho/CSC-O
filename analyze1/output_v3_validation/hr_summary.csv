@@ -1,0 +1,13 @@
+treatment,stage,hr,hr_ci,p_value
+first_is_aromatic,rf2,0.2538,"[0.232, 0.278]",0.0000
+first_is_aromatic,final,1.3537,"[1.074, 1.707]",0.0104
+first_is_aromatic,combined,0.3436,"[0.268, 0.441]",N/A
+cdr3_length_bin,rf2,0.3314,"[0.312, 0.351]",0.0000
+cdr3_length_bin,final,1.1421,"[0.914, 1.427]",0.2426
+cdr3_length_bin,combined,0.3784,"[0.301, 0.477]",N/A
+glycine_ratio_bin,rf2,1.1332,"[1.082, 1.187]",0.0000
+glycine_ratio_bin,final,0.9689,"[0.739, 1.271]",0.8191
+glycine_ratio_bin,combined,1.0979,"[0.834, 1.446]",N/A
+serine_ratio_bin,rf2,1.3935,"[1.337, 1.453]",0.0000
+serine_ratio_bin,final,0.9789,"[0.759, 1.263]",0.8695
+serine_ratio_bin,combined,1.3641,"[1.054, 1.766]",N/A

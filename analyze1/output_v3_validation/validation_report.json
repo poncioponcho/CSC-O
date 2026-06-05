@@ -1,0 +1,176 @@
+{
+  "version": "v3.1",
+  "auc": {
+    "cv_auc_mean": 0.626,
+    "cv_auc_std": 0.0466,
+    "target": 0.8
+  },
+  "hr": [
+    {
+      "treatment": "first_is_aromatic",
+      "stage": "rf2",
+      "hr": 0.2538,
+      "hr_ci": "[0.232, 0.278]",
+      "p_value": "0.0000"
+    },
+    {
+      "treatment": "first_is_aromatic",
+      "stage": "final",
+      "hr": 1.3537,
+      "hr_ci": "[1.074, 1.707]",
+      "p_value": "0.0104"
+    },
+    {
+      "treatment": "first_is_aromatic",
+      "stage": "combined",
+      "hr": 0.3436,
+      "hr_ci": "[0.268, 0.441]",
+      "p_value": "N/A"
+    },
+    {
+      "treatment": "cdr3_length_bin",
+      "stage": "rf2",
+      "hr": 0.3314,
+      "hr_ci": "[0.312, 0.351]",
+      "p_value": "0.0000"
+    },
+    {
+      "treatment": "cdr3_length_bin",
+      "stage": "final",
+      "hr": 1.1421,
+      "hr_ci": "[0.914, 1.427]",
+      "p_value": "0.2426"
+    },
+    {
+      "treatment": "cdr3_length_bin",
+      "stage": "combined",
+      "hr": 0.3784,
+      "hr_ci": "[0.301, 0.477]",
+      "p_value": "N/A"
+    },
+    {
+      "treatment": "glycine_ratio_bin",
+      "stage": "rf2",
+      "hr": 1.1332,
+      "hr_ci": "[1.082, 1.187]",
+      "p_value": "0.0000"
+    },
+    {
+      "treatment": "glycine_ratio_bin",
+      "stage": "final",
+      "hr": 0.9689,
+      "hr_ci": "[0.739, 1.271]",
+      "p_value": "0.8191"
+    },
+    {
+      "treatment": "glycine_ratio_bin",
+      "stage": "combined",
+      "hr": 1.0979,
+      "hr_ci": "[0.834, 1.446]",
+      "p_value": "N/A"
+    },
+    {
+      "treatment": "serine_ratio_bin",
+      "stage": "rf2",
+      "hr": 1.3935,
+      "hr_ci": "[1.337, 1.453]",
+      "p_value": "0.0000"
+    },
+    {
+      "treatment": "serine_ratio_bin",
+      "stage": "final",
+      "hr": 0.9789,
+      "hr_ci": "[0.759, 1.263]",
+      "p_value": "0.8695"
+    },
+    {
+      "treatment": "serine_ratio_bin",
+      "stage": "combined",
+      "hr": 1.3641,
+      "hr_ci": "[1.054, 1.766]",
+      "p_value": "N/A"
+    }
+  ],
+  "ate": [
+    {
+      "treatment": "first_is_aromatic",
+      "total_effect": 0.0343,
+      "direct_effect": 0.0355,
+      "indirect_effect": -0.0012,
+      "total_se": 0.0053,
+      "direct_se": 0.0067
+    },
+    {
+      "treatment": "cdr3_length_bin",
+      "total_effect": 0.0179,
+      "direct_effect": 0.0169,
+      "indirect_effect": 0.001,
+      "total_se": 0.0035,
+      "direct_se": 0.0055
+    },
+    {
+      "treatment": "glycine_ratio_bin",
+      "total_effect": -0.0011,
+      "direct_effect": 0.0004,
+      "indirect_effect": -0.0015,
+      "total_se": 0.0021,
+      "direct_se": 0.0063
+    },
+    {
+      "treatment": "serine_ratio_bin",
+      "total_effect": -0.0015,
+      "direct_effect": 0.0057,
+      "indirect_effect": -0.0072,
+      "total_se": 0.0024,
+      "direct_se": 0.0071
+    }
+  ],
+  "generation": {
+    "n_sequences": 100,
+    "avg_p_final": 0.416901,
+    "shannon_entropy": 6.6439,
+    "diversity_avg": 5.72
+  },
+  "bayesian": {
+    "n_updated": 3,
+    "updates": [
+      {
+        "parameter": "p_rf2_baseline",
+        "prior_mean": 0.238,
+        "prior_std": 0.01,
+        "posterior_mean": 0.294134,
+        "posterior_std": 0.005616,
+        "n_observations": 200,
+        "kl_divergence": 1633582.666361
+      },
+      {
+        "parameter": "p_final_given_rf2_baseline",
+        "prior_mean": 0.026,
+        "prior_std": 0.005,
+        "posterior_mean": 0.005009,
+        "posterior_std": 0.000106,
+        "n_observations": 200,
+        "kl_divergence": 1841076563205.5225
+      },
+      {
+        "parameter": "first_is_aromatic_rf2_hr",
+        "prior_mean": 0.069,
+        "prior_std": 0.01,
+        "posterior_mean": 0.155288,
+        "posterior_std": 0.009558,
+        "n_observations": 97,
+        "kl_divergence": 452051.084991
+      }
+    ]
+  },
+  "simulated": {
+    "n": 200,
+    "rf2_rate": 0.32,
+    "fc_rate": 0.005,
+    "fc_given_rf2": 0.0156
+  },
+  "cross_validation": {
+    "consistent": 4,
+    "total": 4
+  }
+}

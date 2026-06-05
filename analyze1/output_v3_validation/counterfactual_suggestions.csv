@@ -1,0 +1,31 @@
+mutation,position,original_aa,new_aa,mutated_sequence,delta_p_rf2,delta_p_final_given_rf2,delta_p_final,rf2_score_delta,final_score_delta,combined_score_delta,confidence,evidence,original_sequence
+S→A@pos3,3,S,A,FKDAPY,0.2,0.0,0.048,4.0,0.0,1.6,medium,移除丝氨酸: 降低RF2强风险,FKDSPY
+S→C@pos3,3,S,C,FKDCPY,0.2,0.0,0.048,4.0,0.0,1.6,medium,移除丝氨酸: 降低RF2强风险,FKDSPY
+S→D@pos3,3,S,D,FKDDPY,0.2,0.0,0.048,4.0,0.0,1.6,medium,移除丝氨酸: 降低RF2强风险,FKDSPY
+F→G@pos0,0,F,G,GHTSPPA,-0.075,0.05,0.027,-1.5,2.5,0.9,high,"芳香族→非芳香族: RF2 HR=0.069(保护)但Final HR=3.676(风险反转); G首残基: FC正样本中占26.2%, 需glycine_ratio≤0.15; 阶段冲突: Final有利但RF2不利",FHTSPPA
+F→A@pos0,0,F,A,AHTSPPA,-0.1,0.03,0.003,-2.0,1.5,0.1,high,芳香族→非芳香族: RF2 HR=0.069(保护)但Final HR=3.676(风险反转); 阶段冲突: Final有利但RF2不利,FHTSPPA
+F→C@pos0,0,F,C,CHTSPPA,-0.1,0.03,0.003,-2.0,1.5,0.1,high,芳香族→非芳香族: RF2 HR=0.069(保护)但Final HR=3.676(风险反转); 阶段冲突: Final有利但RF2不利,FHTSPPA
+Y→G@pos0,0,Y,G,GKETPPA,-0.075,0.05,0.027,-1.5,2.5,0.9,high,"芳香族→非芳香族: RF2 HR=0.069(保护)但Final HR=3.676(风险反转); G首残基: FC正样本中占26.2%, 需glycine_ratio≤0.15; 阶段冲突: Final有利但RF2不利",YKETPPA
+Y→A@pos0,0,Y,A,AKETPPA,-0.1,0.03,0.003,-2.0,1.5,0.1,high,芳香族→非芳香族: RF2 HR=0.069(保护)但Final HR=3.676(风险反转); 阶段冲突: Final有利但RF2不利,YKETPPA
+Y→C@pos0,0,Y,C,CKETPPA,-0.1,0.03,0.003,-2.0,1.5,0.1,high,芳香族→非芳香族: RF2 HR=0.069(保护)但Final HR=3.676(风险反转); 阶段冲突: Final有利但RF2不利,YKETPPA
+W→A@pos0,0,W,A,AVGDTPA,-0.1,0.03,0.003,-2.0,1.5,0.1,high,芳香族→非芳香族: RF2 HR=0.069(保护)但Final HR=3.676(风险反转); 阶段冲突: Final有利但RF2不利,WVGDTPA
+W→C@pos0,0,W,C,CVGDTPA,-0.1,0.03,0.003,-2.0,1.5,0.1,high,芳香族→非芳香族: RF2 HR=0.069(保护)但Final HR=3.676(风险反转); 阶段冲突: Final有利但RF2不利,WVGDTPA
+W→D@pos0,0,W,D,DVGDTPA,-0.1,0.03,0.003,-2.0,1.5,0.1,high,芳香族→非芳香族: RF2 HR=0.069(保护)但Final HR=3.676(风险反转); 阶段冲突: Final有利但RF2不利,WVGDTPA
+G→A@pos1,1,G,A,DANSGRA,0.15,0.006,0.0414,3.0,0.3,1.38,medium,移除甘氨酸: 降低RF2风险; 阶段协同: 两阶段均有利,DGNSGRA
+G→C@pos1,1,G,C,DCNSGRA,0.15,0.006,0.0414,3.0,0.3,1.38,medium,移除甘氨酸: 降低RF2风险; 阶段协同: 两阶段均有利,DGNSGRA
+G→D@pos1,1,G,D,DDNSGRA,0.15,0.006,0.0414,3.0,0.3,1.38,medium,移除甘氨酸: 降低RF2风险; 阶段协同: 两阶段均有利,DGNSGRA
+W→A@pos0,0,W,A,ATDKEY,-0.1,0.03,0.003,-2.0,1.5,0.1,high,芳香族→非芳香族: RF2 HR=0.069(保护)但Final HR=3.676(风险反转); 阶段冲突: Final有利但RF2不利,WTDKEY
+W→C@pos0,0,W,C,CTDKEY,-0.1,0.03,0.003,-2.0,1.5,0.1,high,芳香族→非芳香族: RF2 HR=0.069(保护)但Final HR=3.676(风险反转); 阶段冲突: Final有利但RF2不利,WTDKEY
+W→D@pos0,0,W,D,DTDKEY,-0.1,0.03,0.003,-2.0,1.5,0.1,high,芳香族→非芳香族: RF2 HR=0.069(保护)但Final HR=3.676(风险反转); 阶段冲突: Final有利但RF2不利,WTDKEY
+G→A@pos5,5,G,A,GSYPSAEPSSFTY,0.075,0.02,0.036,1.5,1.0,1.2,medium,移除甘氨酸: 降低RF2风险; 阶段协同: 两阶段均有利,GSYPSGEPSSFTY
+G→C@pos5,5,G,C,GSYPSCEPSSFTY,0.075,0.02,0.036,1.5,1.0,1.2,medium,移除甘氨酸: 降低RF2风险; 阶段协同: 两阶段均有利,GSYPSGEPSSFTY
+G→D@pos5,5,G,D,GSYPSDEPSSFTY,0.075,0.02,0.036,1.5,1.0,1.2,medium,移除甘氨酸: 降低RF2风险; 阶段协同: 两阶段均有利,GSYPSGEPSSFTY
+Y→A@pos0,0,Y,A,AKNALY,-0.1,0.03,0.003,-2.0,1.5,0.1,high,芳香族→非芳香族: RF2 HR=0.069(保护)但Final HR=3.676(风险反转); 阶段冲突: Final有利但RF2不利,YKNALY
+Y→C@pos0,0,Y,C,CKNALY,-0.1,0.03,0.003,-2.0,1.5,0.1,high,芳香族→非芳香族: RF2 HR=0.069(保护)但Final HR=3.676(风险反转); 阶段冲突: Final有利但RF2不利,YKNALY
+Y→D@pos0,0,Y,D,DKNALY,-0.1,0.03,0.003,-2.0,1.5,0.1,high,芳香族→非芳香族: RF2 HR=0.069(保护)但Final HR=3.676(风险反转); 阶段冲突: Final有利但RF2不利,YKNALY
+F→A@pos0,0,F,A,AAGDETA,-0.1,0.03,0.003,-2.0,1.5,0.1,high,芳香族→非芳香族: RF2 HR=0.069(保护)但Final HR=3.676(风险反转); 阶段冲突: Final有利但RF2不利,FAGDETA
+F→C@pos0,0,F,C,CAGDETA,-0.1,0.03,0.003,-2.0,1.5,0.1,high,芳香族→非芳香族: RF2 HR=0.069(保护)但Final HR=3.676(风险反转); 阶段冲突: Final有利但RF2不利,FAGDETA
+F→D@pos0,0,F,D,DAGDETA,-0.1,0.03,0.003,-2.0,1.5,0.1,high,芳香族→非芳香族: RF2 HR=0.069(保护)但Final HR=3.676(风险反转); 阶段冲突: Final有利但RF2不利,FAGDETA
+G→A@pos1,1,G,A,FAGDTTA,0.15,0.006,0.0414,3.0,0.3,1.38,medium,移除甘氨酸: 降低RF2风险; 阶段协同: 两阶段均有利,FGGDTTA
+G→C@pos1,1,G,C,FCGDTTA,0.15,0.006,0.0414,3.0,0.3,1.38,medium,移除甘氨酸: 降低RF2风险; 阶段协同: 两阶段均有利,FGGDTTA
+G→D@pos1,1,G,D,FDGDTTA,0.15,0.006,0.0414,3.0,0.3,1.38,medium,移除甘氨酸: 降低RF2风险; 阶段协同: 两阶段均有利,FGGDTTA
