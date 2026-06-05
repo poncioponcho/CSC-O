@@ -135,6 +135,7 @@ class FunnelAwareGenerator:
         base_strategy_path: str = None,
         funnel_weights: Dict[str, float] = None,
         min_edit_distance: int = 3,
+        calibrator=None,
         verbose: bool = True,
     ):
         # 参数验证
@@ -144,6 +145,7 @@ class FunnelAwareGenerator:
         self.strategy = strategy or FunnelAwareStrategy(verbose=False)
         self.funnel_weights = funnel_weights or DEFAULT_FUNNEL_WEIGHTS
         self.min_edit_distance = min_edit_distance
+        self.calibrator = calibrator  # ProbabilityCalibrator实例
         self.verbose = verbose
 
         # 加载基础策略(用于硬约束)
@@ -233,7 +235,8 @@ class FunnelAwareGenerator:
                 print(f"  评分过滤: {len(scored)} 条通过 (combined_score >= {min_combined_score})")
 
         # === Step 4: 排序 ===
-        scored.sort(key=lambda s: -s.estimated_p_final)
+        # 综合排序: combined_score为主, soft_score为辅增加区分度
+        scored.sort(key=lambda s: (-(s.combined_score * 10 + s.soft_score)))
 
         # === Step 5: 多样性过滤 ===
         selected = self._diversity_filter(scored, top_n)
@@ -328,10 +331,21 @@ class FunnelAwareGenerator:
                 if self.base_strategy:
                     soft_score = score_soft_preferences(cdr3, self.base_strategy)
 
-                # 估计概率 (sigmoid校准)
-                p_rf2 = self._calibrate_probability(funnel_result.rf2_score, stage='rf2')
-                p_final_given_rf2 = self._calibrate_probability(funnel_result.final_score, stage='final')
-                p_final = p_rf2 * p_final_given_rf2
+                # 估计概率 (优先使用校准器, 否则用sigmoid)
+                if self.calibrator is not None:
+                    p_rf2 = float(self.calibrator.transform(
+                        np.array([funnel_result.rf2_score]), stage='rf2')[0])
+                    # 分解校准: P(final) = P(RF2) × P(FC|RF2)
+                    if 'final_given_rf2' in self.calibrator.calibrators:
+                        p_final_given_rf2 = float(self.calibrator.transform(
+                            np.array([funnel_result.final_score]), stage='final_given_rf2')[0])
+                    else:
+                        p_final_given_rf2 = self._calibrate_probability(funnel_result.final_score, stage='final')
+                    p_final = p_rf2 * p_final_given_rf2
+                else:
+                    p_rf2 = self._calibrate_probability(funnel_result.rf2_score, stage='rf2')
+                    p_final_given_rf2 = self._calibrate_probability(funnel_result.final_score, stage='final')
+                    p_final = p_rf2 * p_final_given_rf2
 
                 gen_seq = GeneratedSequence(
                     cdr3=cdr3,

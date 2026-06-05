@@ -1,0 +1,44 @@
+{
+  "rf2": {
+    "method": "isotonic",
+    "pre_mean": 0.625363,
+    "pre_brier": 0.357066,
+    "post_mean": 0.237609,
+    "post_brier": 0.143898,
+    "n_samples": 10572,
+    "n_positive": 2512,
+    "platt_a": 0.328674,
+    "platt_b": -1.775777,
+    "improvement_brier": 0.213169,
+    "platt_coef": 0.32867385661229437,
+    "platt_intercept": -1.775776604392671
+  },
+  "final_given_rf2": {
+    "method": "platt",
+    "pre_mean": 0.50849,
+    "pre_brier": 0.294477,
+    "post_mean": 0.025873,
+    "post_brier": 0.024936,
+    "n_samples": 2512,
+    "n_positive": 65,
+    "platt_a": -0.880687,
+    "platt_b": -3.820633,
+    "improvement_brier": 0.269541,
+    "platt_coef": -0.8806872632453756,
+    "platt_intercept": -3.820632793660647
+  },
+  "combined": {
+    "method": "isotonic",
+    "pre_mean": 0.663996,
+    "pre_brier": 0.476113,
+    "post_mean": 0.006148,
+    "post_brier": 0.00608,
+    "n_samples": 10572,
+    "n_positive": 65,
+    "platt_a": 0.419277,
+    "platt_b": -5.517519,
+    "improvement_brier": 0.470032,
+    "platt_coef": 0.41927719029358673,
+    "platt_intercept": -5.5175191119648535
+  }
+}
